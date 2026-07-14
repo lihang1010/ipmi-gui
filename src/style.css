@@ -1,0 +1,320 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #1e1e1e;
+  color: #d4d4d4;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* 工具栏 */
+.toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: #2d2d2d;
+  border-bottom: 1px solid #404040;
+}
+
+.toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-left label {
+  color: #888;
+}
+
+.toolbar-left select {
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  padding: 4px 8px;
+  border-radius: 4px;
+  min-width: 200px;
+}
+
+.status-text {
+  color: #888;
+  font-size: 12px;
+}
+
+/* 选项卡 */
+.tabs {
+  display: flex;
+  background: #252526;
+  border-bottom: 1px solid #404040;
+  padding: 0 16px;
+}
+
+.tab {
+  background: none;
+  border: none;
+  color: #888;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  transition: all 0.2s;
+}
+
+.tab:hover {
+  color: #d4d4d4;
+}
+
+.tab.active {
+  color: #d4d4d4;
+  border-bottom-color: #007acc;
+}
+
+/* 主体 */
+.main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 面板 */
+.panel {
+  display: none;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.panel.active {
+  display: flex;
+}
+
+.panel-toolbar {
+  display: flex;
+  gap: 8px;
+  padding: 8px 16px;
+  background: #2d2d2d;
+  border-bottom: 1px solid #404040;
+}
+
+/* 终端容器 */
+.terminal-container {
+  flex: 1;
+  background: #0c0c0c;
+  padding: 4px;
+  overflow: hidden;
+}
+
+/* 输出区域 */
+.output-area {
+  flex: 1;
+  margin: 8px 16px;
+  padding: 12px;
+  background: #1e1e1e;
+  border: 1px solid #404040;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* 输入框 */
+.input-command {
+  flex: 1;
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  padding: 6px 12px;
+  border-radius: 4px;
+  font-family: 'Consolas', 'Courier New', monospace;
+}
+
+.input-command:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+/* 按钮 */
+.btn {
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  padding: 6px 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.btn:hover {
+  background: #4a4a4a;
+}
+
+.btn:active {
+  background: #333;
+}
+
+.btn-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.btn-primary {
+  background: #007acc;
+  border-color: #007acc;
+  color: white;
+}
+
+.btn-primary:hover {
+  background: #005f9e;
+}
+
+.btn-success {
+  background: #28a745;
+  border-color: #28a745;
+  color: white;
+}
+
+.btn-success:hover {
+  background: #218838;
+}
+
+.btn-danger {
+  background: #dc3545;
+  border-color: #dc3545;
+  color: white;
+}
+
+.btn-danger:hover {
+  background: #c82333;
+}
+
+.btn-warning {
+  background: #ffc107;
+  border-color: #ffc107;
+  color: #212529;
+}
+
+.btn-warning:hover {
+  background: #e0a800;
+}
+
+/* 对话框 */
+.dialog-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.dialog {
+  background: #2d2d2d;
+  border-radius: 8px;
+  width: 400px;
+  max-height: 80vh;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #404040;
+}
+
+.dialog-header h3 {
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.dialog-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 24px;
+  cursor: pointer;
+}
+
+.dialog-close:hover {
+  color: #d4d4d4;
+}
+
+.dialog-body {
+  padding: 16px;
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #404040;
+}
+
+/* 表单 */
+.form-group {
+  margin-bottom: 12px;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 4px;
+  color: #888;
+  font-size: 13px;
+}
+
+.form-group input,
+.form-group select {
+  width: 100%;
+  background: #3c3c3c;
+  color: #d4d4d4;
+  border: 1px solid #555;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.form-group input:focus,
+.form-group select:focus {
+  outline: none;
+  border-color: #007acc;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #424242;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}

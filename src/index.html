@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';">
+  <title>IPMI 管理工具</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="../node_modules/xterm/css/xterm.css">
+</head>
+<body>
+  <div class="app">
+    <!-- 工具栏 -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <label>服务器:</label>
+        <select id="server-select">
+          <option value="">-- 选择服务器 --</option>
+        </select>
+        <button id="btn-add-server" class="btn btn-sm">添加</button>
+        <button id="btn-edit-server" class="btn btn-sm">编辑</button>
+        <button id="btn-delete-server" class="btn btn-sm btn-danger">删除</button>
+      </div>
+      <div class="toolbar-right">
+        <span id="status-text" class="status-text">未连接</span>
+      </div>
+    </div>
+
+    <!-- 主体 -->
+    <div class="main">
+      <!-- 选项卡 -->
+      <div class="tabs">
+        <button class="tab active" data-tab="sol">SOL</button>
+        <button class="tab" data-tab="power">电源</button>
+        <button class="tab" data-tab="sensor">传感器</button>
+        <button class="tab" data-tab="fru">FRU</button>
+        <button class="tab" data-tab="sel">事件日志</button>
+        <button class="tab" data-tab="user">用户</button>
+        <button class="tab" data-tab="network">网络</button>
+        <button class="tab" data-tab="raw">原始命令</button>
+      </div>
+
+      <!-- SOL 面板 -->
+      <div id="panel-sol" class="panel active">
+        <div class="panel-toolbar">
+          <button id="btn-sol-start" class="btn btn-primary">启动 SOL</button>
+          <button id="btn-sol-stop" class="btn btn-warning">停止 SOL</button>
+          <button id="btn-sol-deactivate" class="btn">发送 deactivate</button>
+          <button id="btn-sol-save" class="btn">保存日志</button>
+          <button id="btn-sol-clear" class="btn">清屏</button>
+        </div>
+        <div id="terminal" class="terminal-container"></div>
+      </div>
+
+      <!-- 其他面板 (简化) -->
+      <div id="panel-power" class="panel">
+        <div class="panel-toolbar">
+          <button onclick="executePower('status')" class="btn">状态</button>
+          <button onclick="executePower('on')" class="btn btn-success">开机</button>
+          <button onclick="executePower('off')" class="btn btn-danger">关机</button>
+          <button onclick="executePower('cycle')" class="btn btn-warning">重启</button>
+        </div>
+        <pre id="output-power" class="output-area">点击按钮执行命令...</pre>
+      </div>
+
+      <div id="panel-sensor" class="panel">
+        <div class="panel-toolbar">
+          <button onclick="executeSensor()" class="btn">刷新</button>
+        </div>
+        <pre id="output-sensor" class="output-area">点击刷新获取传感器数据...</pre>
+      </div>
+
+      <div id="panel-fru" class="panel">
+        <div class="panel-toolbar">
+          <button onclick="executeCommand('fru list')" class="btn">刷新</button>
+        </div>
+        <pre id="output-fru" class="output-area">点击刷新获取FRU信息...</pre>
+      </div>
+
+      <div id="panel-sel" class="panel">
+        <div class="panel-toolbar">
+          <button onclick="executeCommand('sel list')" class="btn">刷新</button>
+          <button onclick="executeCommand('sel info')" class="btn">信息</button>
+        </div>
+        <pre id="output-sel" class="output-area">点击刷新获取事件日志...</pre>
+      </div>
+
+      <div id="panel-user" class="panel">
+        <div class="panel-toolbar">
+          <button onclick="executeCommand('user list')" class="btn">刷新</button>
+        </div>
+        <pre id="output-user" class="output-area">点击刷新获取用户列表...</pre>
+      </div>
+
+      <div id="panel-network" class="panel">
+        <div class="panel-toolbar">
+          <button onclick="executeCommand('lan print')" class="btn">刷新</button>
+        </div>
+        <pre id="output-network" class="output-area">点击刷新获取网络配置...</pre>
+      </div>
+
+      <div id="panel-raw" class="panel">
+        <div class="panel-toolbar">
+          <input type="text" id="raw-command" class="input-command" placeholder="输入命令，如: chassis status">
+          <button onclick="executeRawCommand()" class="btn btn-primary">执行</button>
+        </div>
+        <pre id="output-raw" class="output-area">输入命令并点击执行...</pre>
+      </div>
+    </div>
+  </div>
+
+  <!-- 服务器配置对话框 -->
+  <div id="server-dialog" class="dialog-overlay" style="display: none;">
+    <div class="dialog">
+      <div class="dialog-header">
+        <h3 id="dialog-title">添加服务器</h3>
+        <button class="dialog-close" onclick="closeDialog()">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <div class="form-group">
+          <label>名称:</label>
+          <input type="text" id="server-name" placeholder="生产服务器-01">
+        </div>
+        <div class="form-group">
+          <label>IP 地址:</label>
+          <input type="text" id="server-host" placeholder="192.168.1.100">
+        </div>
+        <div class="form-group">
+          <label>端口:</label>
+          <input type="number" id="server-port" value="623">
+        </div>
+        <div class="form-group">
+          <label>用户名:</label>
+          <input type="text" id="server-username" placeholder="ADMIN">
+        </div>
+        <div class="form-group">
+          <label>密码:</label>
+          <input type="password" id="server-password">
+        </div>
+        <div class="form-group">
+          <label>接口:</label>
+          <select id="server-interface">
+            <option value="lanplus">lanplus (IPMI v2.0)</option>
+            <option value="lan">lan (IPMI v1.5)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Cipher Suite:</label>
+          <input type="number" id="server-cipher" value="17" min="0" max="17">
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn" onclick="closeDialog()">取消</button>
+        <button class="btn btn-primary" onclick="saveServer()">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="renderer.js"></script>
+</body>
+</html>

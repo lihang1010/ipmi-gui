@@ -1,0 +1,13 @@
+appId: com.ipmi.gui
+productName: IPMI管理工具
+directories:
+  output: dist
+files:
+  - "**/*"
+  - "!node_modules/.cache/**/*"
+win:
+  target: nsis
+  icon: assets/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
