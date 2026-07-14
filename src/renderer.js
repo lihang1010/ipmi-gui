@@ -1,7 +1,10 @@
 // 渲染进程脚本
+const { ipcRenderer } = require('electron');
 const { Terminal } = require('xterm');
 const { FitAddon } = require('@xterm/addon-fit');
 const { SerializeAddon } = require('@xterm/addon-serialize');
+const path = require('path');
+const fs = require('fs');
 
 // 全局变量
 let terminal = null;
@@ -10,31 +13,65 @@ let serializeAddon = null;
 let config = { servers: [], settings: {} };
 let currentServer = null;
 let editingServerId = null;
+let solRunning = false;
+
+// 配置文件路径
+const configPath = path.join(
+  process.env.APPDATA || process.env.HOME,
+  'ipmi-gui',
+  'config.json'
+);
+
+// 加载配置
+function loadConfig() {
+  try {
+    const dir = path.dirname(configPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+  } catch (e) {
+    console.error('加载配置失败:', e);
+  }
+  return { servers: [], settings: {} };
+}
+
+// 保存配置
+function saveConfigToFile() {
+  try {
+    const dir = path.dirname(configPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
+  } catch (e) {
+    console.error('保存配置失败:', e);
+  }
+}
 
 // ========== 初始化 ==========
 
-document.addEventListener('DOMContentLoaded', async () => {
-  // 初始化终端
-  initTerminal();
-
+document.addEventListener('DOMContentLoaded', () => {
   // 加载配置
-  config = await window.api.getConfig();
+  config = loadConfig();
   updateServerList();
 
   // 绑定事件
   bindEvents();
 
   // 监听 SOL 数据
-  window.api.onSolData((data) => {
+  ipcRenderer.on('sol:data', (event, data) => {
     if (terminal) terminal.write(data);
   });
 
-  window.api.onSolExit((code) => {
+  ipcRenderer.on('sol:exit', (event, code) => {
+    solRunning = false;
     showStatus(`SOL 已退出 (代码: ${code})`);
+    updateSolButtons();
   });
 });
 
 function initTerminal() {
+  if (terminal) return;
+
   terminal = new Terminal({
     theme: {
       background: '#0c0c0c',
@@ -59,7 +96,9 @@ function initTerminal() {
 
   // 用户输入
   terminal.onData((data) => {
-    window.api.writeSol(data);
+    if (solRunning) {
+      ipcRenderer.send('sol:write', data);
+    }
   });
 
   // 窗口大小变化
@@ -85,8 +124,9 @@ function bindEvents() {
       tab.classList.add('active');
       document.getElementById(`panel-${tab.dataset.tab}`).classList.add('active');
 
-      if (tab.dataset.tab === 'sol' && fitAddon) {
-        setTimeout(() => fitAddon.fit(), 100);
+      if (tab.dataset.tab === 'sol') {
+        initTerminal();
+        setTimeout(() => { if (fitAddon) fitAddon.fit(); }, 100);
       }
     });
   });
@@ -115,6 +155,9 @@ function bindEvents() {
   document.getElementById('raw-command').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') executeRawCommand();
   });
+
+  // 初始化终端
+  initTerminal();
 }
 
 // ========== 服务器管理 ==========
@@ -179,7 +222,7 @@ function saveServer() {
     config.servers.push(serverData);
   }
 
-  window.api.saveConfig(config);
+  saveConfigToFile();
   updateServerList();
   closeDialog();
 
@@ -197,7 +240,7 @@ function deleteServer() {
   if (!confirm(`确定删除服务器 "${currentServer.name}" 吗?`)) return;
 
   config.servers = config.servers.filter(s => s.id !== currentServer.id);
-  window.api.saveConfig(config);
+  saveConfigToFile();
   updateServerList();
   currentServer = null;
 }
@@ -210,11 +253,15 @@ async function startSol() {
     return;
   }
 
+  initTerminal();
   showStatus('正在连接...');
-  const result = await window.api.startSol(currentServer);
+
+  const result = await ipcRenderer.invoke('sol:start', currentServer);
 
   if (result.success) {
+    solRunning = true;
     showStatus(`已连接: ${currentServer.host}`);
+    updateSolButtons();
     terminal.focus();
   } else {
     showStatus(`连接失败: ${result.error}`);
@@ -223,9 +270,11 @@ async function startSol() {
 }
 
 async function stopSol() {
-  const result = await window.api.stopSol();
+  const result = await ipcRenderer.invoke('sol:stop');
   if (result.success) {
+    solRunning = false;
     showStatus('SOL 已停止');
+    updateSolButtons();
   }
 }
 
@@ -235,7 +284,7 @@ async function deactivateSol() {
     return;
   }
 
-  const result = await window.api.deactivateSol(currentServer);
+  const result = await ipcRenderer.invoke('sol:deactivate', currentServer);
   if (result.success) {
     showStatus('已发送 deactivate 命令');
   } else {
@@ -243,19 +292,40 @@ async function deactivateSol() {
   }
 }
 
+function updateSolButtons() {
+  document.getElementById('btn-sol-start').disabled = solRunning;
+  document.getElementById('btn-sol-stop').disabled = !solRunning;
+}
+
 function saveSolLog() {
-  if (!serializeAddon) return;
+  if (!serializeAddon) {
+    alert('终端未初始化');
+    return;
+  }
 
   const content = serializeAddon.serialize();
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const serverName = currentServer ? currentServer.host : 'unknown';
   const defaultName = `sol_${serverName}_${timestamp}.log`;
 
-  window.api.saveFile(defaultName, content).then(result => {
-    if (result.success) {
-      showStatus(`日志已保存: ${result.path}`);
-    }
-  });
+  // 使用原生保存对话框
+  const { dialog } = require('electron').remote || {};
+  if (dialog) {
+    dialog.showSaveDialog({
+      defaultPath: defaultName,
+      filters: [{ name: '日志文件', extensions: ['log', 'txt'] }]
+    }).then(result => {
+      if (!result.canceled && result.filePath) {
+        fs.writeFileSync(result.filePath, content, 'utf-8');
+        showStatus(`日志已保存: ${result.filePath}`);
+      }
+    });
+  } else {
+    // 降级方案：保存到桌面
+    const desktopPath = path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop', defaultName);
+    fs.writeFileSync(desktopPath, content, 'utf-8');
+    showStatus(`日志已保存到桌面: ${desktopPath}`);
+  }
 }
 
 function clearTerminal() {
@@ -264,57 +334,32 @@ function clearTerminal() {
 
 // ========== 命令执行 ==========
 
-async function executePower(action) {
+async function executeCommand(command, outputId) {
   if (!currentServer) {
     alert('请先选择服务器');
     return;
   }
 
-  const result = await window.api.executeCommand(currentServer, `power ${action}`);
-  document.getElementById('output-power').textContent =
-    result.code === 0 ? result.stdout : `错误: ${result.stderr}`;
-}
-
-async function executeSensor() {
-  if (!currentServer) {
-    alert('请先选择服务器');
-    return;
-  }
-
-  const result = await window.api.executeCommand(currentServer, 'sdr list');
-  document.getElementById('output-sensor').textContent =
-    result.code === 0 ? result.stdout : `错误: ${result.stderr}`;
-}
-
-async function executeCommand(command) {
-  if (!currentServer) {
-    alert('请先选择服务器');
-    return;
-  }
-
-  const panel = command.split(' ')[0];
-  const result = await window.api.executeCommand(currentServer, command);
+  const result = await ipcRenderer.invoke('ipmi:execute', currentServer, command);
   const output = result.code === 0 ? result.stdout : `错误: ${result.stderr}`;
-
-  const outputEl = document.getElementById(`output-${panel}`);
-  if (outputEl) outputEl.textContent = output;
+  document.getElementById(outputId).textContent = output;
 }
 
-async function executeRawCommand() {
-  if (!currentServer) {
-    alert('请先选择服务器');
-    return;
-  }
+function executePower(action) {
+  executeCommand(`power ${action}`, 'output-power');
+}
 
+function executeSensor() {
+  executeCommand('sdr list', 'output-sensor');
+}
+
+function executeRawCommand() {
   const command = document.getElementById('raw-command').value.trim();
   if (!command) {
     alert('请输入命令');
     return;
   }
-
-  const result = await window.api.executeCommand(currentServer, command);
-  const output = result.code === 0 ? result.stdout : `错误: ${result.stderr}`;
-  document.getElementById('output-raw').textContent = output;
+  executeCommand(command, 'output-raw');
 }
 
 // ========== 工具函数 ==========

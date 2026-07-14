@@ -46,15 +46,15 @@ function createWindow() {
     title: 'IPMI 管理工具',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true
+      nodeIntegration: true,
+      contextIsolation: false
     }
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 
   // 开发时打开开发者工具
-  // mainWindow.webContents.openDevTools();
+  mainWindow.webContents.openDevTools();
 }
 
 // 构建 ipmitool 参数
