@@ -72,29 +72,29 @@
 
       <div id="panel-fru" class="panel">
         <div class="panel-toolbar">
-          <button onclick="executeCommand('fru list')" class="btn">刷新</button>
+          <button onclick="executeCommand('fru list', 'output-fru')" class="btn">刷新</button>
         </div>
         <pre id="output-fru" class="output-area">点击刷新获取FRU信息...</pre>
       </div>
 
       <div id="panel-sel" class="panel">
         <div class="panel-toolbar">
-          <button onclick="executeCommand('sel list')" class="btn">刷新</button>
-          <button onclick="executeCommand('sel info')" class="btn">信息</button>
+          <button onclick="executeCommand('sel list', 'output-sel')" class="btn">刷新</button>
+          <button onclick="executeCommand('sel info', 'output-sel')" class="btn">信息</button>
         </div>
         <pre id="output-sel" class="output-area">点击刷新获取事件日志...</pre>
       </div>
 
       <div id="panel-user" class="panel">
         <div class="panel-toolbar">
-          <button onclick="executeCommand('user list')" class="btn">刷新</button>
+          <button onclick="executeCommand('user list', 'output-user')" class="btn">刷新</button>
         </div>
         <pre id="output-user" class="output-area">点击刷新获取用户列表...</pre>
       </div>
 
       <div id="panel-network" class="panel">
         <div class="panel-toolbar">
-          <button onclick="executeCommand('lan print')" class="btn">刷新</button>
+          <button onclick="executeCommand('lan print', 'output-network')" class="btn">刷新</button>
         </div>
         <pre id="output-network" class="output-area">点击刷新获取网络配置...</pre>
       </div>
