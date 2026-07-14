@@ -94,9 +94,14 @@ function initTerminal() {
   terminal.open(document.getElementById('terminal'));
   fitAddon.fit();
 
-  // 用户输入
+  // 点击终端容器时才获取焦点
+  document.getElementById('terminal').addEventListener('click', () => {
+    terminal.focus();
+  });
+
+  // 用户输入 - 仅当终端有焦点时发送
   terminal.onData((data) => {
-    if (solRunning) {
+    if (solRunning && document.activeElement === terminal.text) {
       ipcRenderer.send('sol:write', data);
     }
   });
