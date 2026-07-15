@@ -68,7 +68,7 @@ document.addEventListener('DOMContentLoaded', () => {
   ipcRenderer.on('sol:exit', (event, code) => {
     solRunning = false;
     showStatus('disconnected', `SOL 已退出 (代码: ${code})`);
-    updateSolButtons();
+    document.getElementById('btn-sol-start').disabled = false;
   });
 });
 
@@ -345,7 +345,7 @@ async function startSol() {
     if (result.success) {
       solRunning = true;
       showStatus('connected', `${currentServer.name}`);
-      updateSolButtons();
+      document.getElementById('btn-sol-start').disabled = true;
       terminal.focus();
     } else {
       showStatus('error', `连接失败`);
@@ -362,19 +362,23 @@ async function stopSol() {
     return;
   }
 
-  const result = await ipcRenderer.invoke('sol:stop', currentServer);
-  if (result.success) {
-    solRunning = false;
-    showStatus('idle', 'SOL 已停止');
-    updateSolButtons();
-  } else {
-    showStatus('error', '停止失败');
-  }
-}
+  const btn = document.getElementById('btn-sol-stop');
+  btn.classList.add('loading');
 
-function updateSolButtons() {
-  document.getElementById('btn-sol-start').disabled = solRunning;
-  document.getElementById('btn-sol-stop').disabled = !solRunning;
+  try {
+    const result = await ipcRenderer.invoke('sol:stop', currentServer);
+    if (result.success) {
+      solRunning = false;
+      showStatus('idle', 'SOL 已停止');
+      document.getElementById('btn-sol-start').disabled = false;
+    } else {
+      showStatus('error', '停止失败');
+      const msg = result.stderr || result.error || '未知错误';
+      alert(`停止 SOL 失败:\n${msg}`);
+    }
+  } finally {
+    btn.classList.remove('loading');
+  }
 }
 
 function saveSolLog() {
