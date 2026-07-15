@@ -358,11 +358,18 @@ async function startSol() {
 }
 
 async function stopSol() {
-  const result = await ipcRenderer.invoke('sol:stop');
+  if (!currentServer) {
+    alert('请先选择服务器');
+    return;
+  }
+
+  const result = await ipcRenderer.invoke('sol:stop', currentServer);
   if (result.success) {
     solRunning = false;
     showStatus('idle', 'SOL 已停止');
     updateSolButtons();
+  } else {
+    showStatus('error', '停止失败');
   }
 }
 

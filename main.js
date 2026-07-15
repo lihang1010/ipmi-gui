@@ -170,28 +170,29 @@ ipcMain.on('sol:write', (event, data) => {
   }
 });
 
-// 停止 SOL
-ipcMain.handle('sol:stop', async () => {
-  if (!ptyProcess) {
-    return { success: false, error: 'SOL 未运行' };
-  }
+// 停止 SOL - 直接执行 deactivate
+ipcMain.handle('sol:stop', async (event, server) => {
+  const ipmitoolPath = getIpmiToolPath();
+  const args = [...buildArgs(server), 'sol', 'deactivate'];
 
-  try {
-    // 发送退出序列
-    ptyProcess.write('\x1d'); // Ctrl+]
+  return new Promise((resolve) => {
+    const spawn = require('child_process').spawn;
+    const proc = spawn(ipmitoolPath, args, {
+      windowsHide: true
+    });
 
-    // 等待一会后强制终止
-    setTimeout(() => {
-      if (ptyProcess) {
-        ptyProcess.kill();
-        ptyProcess = null;
-      }
-    }, 2000);
+    let stderr = '';
+    proc.stderr.on('data', (data) => { stderr += data; });
 
-    return { success: true };
-  } catch (err) {
-    return { success: false, error: err.message };
-  }
+    proc.on('close', (code) => {
+      ptyProcess = null;
+      resolve({ success: code === 0, stderr });
+    });
+
+    proc.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
 });
 
 // 执行 sol deactivate
