@@ -2,12 +2,41 @@ appId: com.ipmi.gui
 productName: IPMI管理工具
 directories:
   output: dist
+
 files:
   - "**/*"
   - "!node_modules/.cache/**/*"
+  - "!dist/**/*"
+  - "!example_servers.json"
+
+# 额外资源文件 - ipmitool 及其依赖
+extraResources:
+  - from: "../ipmitool/ipmitool.exe"
+    to: "ipmitool.exe"
+  - from: "../ipmitool/cygwin1.dll"
+    to: "cygwin1.dll"
+  - from: "../ipmitool/cygcrypto-1.0.0.dll"
+    to: "cygcrypto-1.0.0.dll"
+  - from: "../ipmitool/cygz.dll"
+    to: "cygz.dll"
+
 win:
-  target: nsis
+  target:
+    - target: nsis
+      arch:
+        - x64
+    - target: portable
+      arch:
+        - x64
   icon: assets/icon.ico
+  artifactName: "${productName}-${version}-win-${arch}.${ext}"
+
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: IPMI管理工具
+
+portable:
+  artifactName: "${productName}-${version}-portable.${ext}"
