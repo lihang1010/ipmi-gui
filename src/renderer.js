@@ -388,26 +388,38 @@ function saveSolLog() {
   }
 
   const content = serializeAddon.serialize();
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+  // UTC+8 时区时间戳
+  const now = new Date();
+  const utc8 = new Date(now.getTime() + (8 * 60 * 60 * 1000));
+  const timestamp = utc8.toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
+
   const serverName = currentServer ? currentServer.host : 'unknown';
   const defaultName = `sol_${serverName}_${timestamp}.log`;
+
+  // 默认保存到上次目录或桌面
+  const defaultDir = config.settings?.lastSaveDir ||
+    path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop');
+  const defaultPath = path.join(defaultDir, defaultName);
 
   // 使用原生保存对话框
   const { dialog } = require('electron').remote || {};
   if (dialog) {
     dialog.showSaveDialog({
-      defaultPath: defaultName,
-      filters: [{ name: '日志文件', extensions: ['log', 'txt'] }]
+      defaultPath: defaultPath,
+      filters: [{ name: '日志文件', extensions: ['log', 'txt'] }, { name: '所有文件', extensions: ['*'] }]
     }).then(result => {
       if (!result.canceled && result.filePath) {
         fs.writeFileSync(result.filePath, content, 'utf-8');
+        // 记住本次保存目录
+        config.settings = config.settings || {};
+        config.settings.lastSaveDir = path.dirname(result.filePath);
+        saveConfigToFile();
         showStatus('connected', `日志已保存`);
       }
     });
   } else {
-    // 降级方案：保存到桌面
-    const desktopPath = path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop', defaultName);
-    fs.writeFileSync(desktopPath, content, 'utf-8');
+    fs.writeFileSync(defaultPath, content, 'utf-8');
     showStatus('connected', `已保存到桌面`);
   }
 }
