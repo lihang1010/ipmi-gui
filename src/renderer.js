@@ -223,12 +223,16 @@ function bindEvents() {
   document.getElementById('btn-sol-start').addEventListener('click', startSol);
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
   document.getElementById('btn-sol-save').addEventListener('click', saveSolLog);
+  document.getElementById('btn-sol-logdir').addEventListener('click', selectLogDir);
   document.getElementById('btn-sol-clear').addEventListener('click', clearTerminal);
 
   // 原始命令回车
   document.getElementById('raw-command').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') executeRawCommand();
   });
+
+  // 显示当前日志目录
+  updateLogDirDisplay();
 
   // 初始化终端
   initTerminal();
@@ -397,10 +401,8 @@ function saveSolLog() {
   const serverName = currentServer ? currentServer.host : 'unknown';
   const defaultName = `sol_${serverName}_${timestamp}.log`;
 
-  // 默认保存到上次目录或桌面
-  const defaultDir = config.settings?.lastSaveDir ||
-    path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop');
-  const defaultPath = path.join(defaultDir, defaultName);
+  // 使用配置的日志目录
+  const defaultPath = path.join(getLogDir(), defaultName);
 
   // 使用原生保存对话框
   const { dialog } = require('electron').remote || {};
@@ -426,6 +428,45 @@ function saveSolLog() {
 
 function clearTerminal() {
   if (terminal) terminal.clear();
+}
+
+// ========== 日志目录 ==========
+
+function getLogDir() {
+  return config.settings?.lastSaveDir ||
+    path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop');
+}
+
+function updateLogDirDisplay() {
+  const el = document.getElementById('sol-logdir-text');
+  if (el) {
+    const dir = getLogDir();
+    // 只显示最后两级目录
+    const parts = dir.replace(/\\/g, '/').split('/');
+    const short = parts.length > 2 ? '...' + parts.slice(-2).join('/') : dir;
+    el.textContent = short;
+    el.title = dir;
+  }
+}
+
+async function selectLogDir() {
+  const { dialog } = require('electron').remote || {};
+  if (!dialog) return;
+
+  const currentDir = getLogDir();
+  const result = await dialog.showOpenDialog({
+    properties: ['openDirectory'],
+    defaultPath: currentDir,
+    title: '选择日志保存目录'
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    config.settings = config.settings || {};
+    config.settings.lastSaveDir = result.filePaths[0];
+    saveConfigToFile();
+    updateLogDirDisplay();
+    showStatus('connected', `日志目录已更新`);
+  }
 }
 
 // ========== 命令执行 ==========
