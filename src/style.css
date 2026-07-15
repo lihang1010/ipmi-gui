@@ -199,6 +199,25 @@ body {
   background: var(--danger);
 }
 
+/* Log directory display */
+.logdir-display {
+  max-width: 250px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.04);
+}
+
+.logdir-display:hover {
+  color: var(--text-secondary);
+  background: rgba(255,255,255,0.06);
+}
+
 /* --- Tabs --- */
 .tabs {
   display: flex;

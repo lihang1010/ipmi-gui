@@ -20,6 +20,9 @@
         <button id="btn-add-server" class="btn btn-sm" data-tooltip="添加新服务器">添加</button>
         <button id="btn-edit-server" class="btn btn-sm" data-tooltip="编辑当前服务器">编辑</button>
         <button id="btn-delete-server" class="btn btn-sm btn-danger" data-tooltip="删除当前服务器">删除</button>
+        <span class="separator"></span>
+        <button id="btn-import-config" class="btn btn-sm" data-tooltip="导入服务器配置">导入</button>
+        <button id="btn-export-config" class="btn btn-sm" data-tooltip="导出服务器配置">导出</button>
       </div>
       <div class="toolbar-right">
         <span id="status-text" class="status-badge">未连接</span>
@@ -48,7 +51,7 @@
           <span class="separator"></span>
           <button id="btn-sol-save" class="btn btn-ghost">保存日志</button>
           <button id="btn-sol-logdir" class="btn btn-ghost">日志目录</button>
-          <span id="sol-logdir-text" class="status-text" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" data-tooltip="当前日志保存目录"></span>
+          <span id="sol-logdir-text" class="logdir-display" data-tooltip="当前日志保存目录"></span>
           <span class="separator"></span>
           <button id="btn-sol-clear" class="btn btn-ghost">清屏</button>
         </div>

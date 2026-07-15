@@ -219,6 +219,8 @@ function bindEvents() {
     if (currentServer) openDialog(currentServer);
   });
   document.getElementById('btn-delete-server').addEventListener('click', deleteServer);
+  document.getElementById('btn-import-config').addEventListener('click', importConfig);
+  document.getElementById('btn-export-config').addEventListener('click', exportConfig);
 
   document.getElementById('btn-sol-start').addEventListener('click', startSol);
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
@@ -327,6 +329,85 @@ function deleteServer() {
   updateServerList();
   currentServer = null;
   showStatus('idle', '未选择服务器');
+}
+
+// ========== 导入导出 ==========
+
+async function exportConfig() {
+  if (!config.servers || config.servers.length === 0) {
+    alert('没有可导出的服务器配置');
+    return;
+  }
+
+  const exportData = {
+    exportTime: new Date().toISOString(),
+    version: '1.0',
+    servers: config.servers
+  };
+
+  const content = JSON.stringify(exportData, null, 2);
+  const defaultPath = path.join(
+    process.env.USERPROFILE || process.env.HOME,
+    'Desktop',
+    `ipmi_servers_${new Date().toISOString().slice(0, 10)}.json`
+  );
+
+  const result = await ipcRenderer.invoke('file:save', defaultPath, content);
+  if (result.success) {
+    showStatus('connected', `配置已导出`);
+  }
+}
+
+async function importConfig() {
+  const filePath = await ipcRenderer.invoke('dialog:selectFile', [
+    { name: 'JSON 文件', extensions: ['json'] },
+    { name: '所有文件', extensions: ['*'] }
+  ]);
+
+  if (!filePath) return;
+
+  try {
+    const content = fs.readFileSync(filePath, 'utf-8');
+    const importData = JSON.parse(content);
+
+    if (!importData.servers || !Array.isArray(importData.servers)) {
+      alert('无效的配置文件格式');
+      return;
+    }
+
+    // 验证每个服务器配置
+    const validServers = importData.servers.filter(s => s.name && s.host);
+
+    if (validServers.length === 0) {
+      alert('配置文件中没有有效的服务器');
+      return;
+    }
+
+    const action = confirm(
+      `找到 ${validServers.length} 个服务器配置。\n\n` +
+      `点击"确定"合并到现有配置\n` +
+      `点击"取消"放弃导入`
+    );
+
+    if (!action) return;
+
+    // 合并配置（跳过重复的）
+    let imported = 0;
+    for (const server of validServers) {
+      const exists = config.servers.some(s => s.host === server.host && s.name === server.name);
+      if (!exists) {
+        server.id = server.id || Date.now().toString() + Math.random().toString(36).slice(2, 6);
+        config.servers.push(server);
+        imported++;
+      }
+    }
+
+    saveConfigToFile();
+    updateServerList();
+    showStatus('connected', `已导入 ${imported} 个服务器`);
+  } catch (err) {
+    alert(`导入失败: ${err.message}`);
+  }
 }
 
 // ========== SOL 操作 ==========

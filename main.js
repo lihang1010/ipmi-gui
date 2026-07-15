@@ -247,6 +247,19 @@ ipcMain.handle('dialog:selectDirectory', async () => {
   return null;
 });
 
+// 选择文件
+ipcMain.handle('dialog:selectFile', async (event, filters) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: filters || [{ name: '所有文件', extensions: ['*'] }]
+  });
+
+  if (!result.canceled && result.filePaths.length > 0) {
+    return result.filePaths[0];
+  }
+  return null;
+});
+
 // ========== 生命周期 ==========
 
 app.whenReady().then(createWindow);
