@@ -510,7 +510,9 @@ function getLogDir() {
 function updateLogDirDisplay() {
   const el = document.getElementById('sol-logdir-text');
   if (el) {
-    el.textContent = getLogDir();
+    const dir = getLogDir();
+    el.textContent = dir;
+    el.title = dir;  // 原生 tooltip 显示完整路径
   }
 }
 

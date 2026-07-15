@@ -1,0 +1,39 @@
+{
+  "exportTime": "2026-07-15T10:30:00.000Z",
+  "version": "1.0",
+  "servers": [
+    {
+      "id": "1001",
+      "name": "生产服务器-01",
+      "host": "192.168.1.100",
+      "port": 623,
+      "username": "ADMIN",
+      "password": "password123",
+      "interface": "lanplus",
+      "cipherSuite": 17,
+      "privilegeLevel": "ADMINISTRATOR"
+    },
+    {
+      "id": "1002",
+      "name": "生产服务器-02",
+      "host": "192.168.1.101",
+      "port": 623,
+      "username": "root",
+      "password": "calvin",
+      "interface": "lanplus",
+      "cipherSuite": 17,
+      "privilegeLevel": "ADMINISTRATOR"
+    },
+    {
+      "id": "1003",
+      "name": "开发测试机",
+      "host": "10.0.0.50",
+      "port": 623,
+      "username": "admin",
+      "password": "admin",
+      "interface": "lan",
+      "cipherSuite": 3,
+      "privilegeLevel": "ADMINISTRATOR"
+    }
+  ]
+}
