@@ -107,9 +107,9 @@ function initTerminal() {
     terminal.focus();
   });
 
-  // 用户输入 - 仅当终端有焦点时发送
+  // 用户输入 - xterm.js 内部已处理焦点
   terminal.onData((data) => {
-    if (solRunning && document.activeElement === terminal.text) {
+    if (solRunning) {
       ipcRenderer.send('sol:write', data);
     }
   });
