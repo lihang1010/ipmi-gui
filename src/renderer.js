@@ -57,6 +57,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // 绑定事件
   bindEvents();
 
+  // 全局键盘快捷键
+  bindKeyboardShortcuts();
+
   // 监听 SOL 数据
   ipcRenderer.on('sol:data', (event, data) => {
     if (terminal) terminal.write(data);
@@ -64,7 +67,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   ipcRenderer.on('sol:exit', (event, code) => {
     solRunning = false;
-    showStatus(`SOL 已退出 (代码: ${code})`);
+    showStatus('disconnected', `SOL 已退出 (代码: ${code})`);
     updateSolButtons();
   });
 });
@@ -74,15 +77,20 @@ function initTerminal() {
 
   terminal = new Terminal({
     theme: {
-      background: '#0c0c0c',
-      foreground: '#cccccc',
-      cursor: '#ffffff',
-      selectionBackground: '#264f78'
+      background: '#0d0d10',
+      foreground: '#d4d4d8',
+      cursor: '#e4e4e8',
+      cursorAccent: '#0d0d10',
+      selectionBackground: 'rgba(91, 155, 213, 0.3)',
+      selectionForeground: '#ffffff'
     },
-    fontFamily: 'Consolas, "Courier New", monospace',
+    fontFamily: "'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace",
     fontSize: 14,
+    lineHeight: 1.3,
     cursorBlink: true,
-    scrollback: 10000
+    cursorStyle: 'bar',
+    scrollback: 10000,
+    allowProposedApi: true
   });
 
   fitAddon = new FitAddon();
@@ -112,9 +120,67 @@ function initTerminal() {
   });
 
   // 显示欢迎信息
-  terminal.writeln('\x1b[36mIPMI SOL 终端\x1b[0m');
-  terminal.writeln('点击 [启动 SOL] 连接到服务器');
+  terminal.writeln('\x1b[38;2;91;155;213m  ╔══════════════════════════════════════╗\x1b[0m');
+  terminal.writeln('\x1b[38;2;91;155;213m  ║        IPMI SOL 终端                 ║\x1b[0m');
+  terminal.writeln('\x1b[38;2;91;155;213m  ╚══════════════════════════════════════╝\x1b[0m');
   terminal.writeln('');
+  terminal.writeln('\x1b[38;2;107;107;117m  点击 [启动 SOL] 连接到服务器\x1b[0m');
+  terminal.writeln('');
+}
+
+// ========== 键盘快捷键 ==========
+
+function bindKeyboardShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    // Ctrl+R: 刷新当前面板
+    if (e.ctrlKey && e.key === 'r') {
+      e.preventDefault();
+      refreshCurrentPanel();
+    }
+    // Ctrl+L: 清屏当前面板
+    if (e.ctrlKey && e.key === 'l') {
+      e.preventDefault();
+      clearCurrentPanel();
+    }
+    // Ctrl+N: 添加服务器
+    if (e.ctrlKey && e.key === 'n') {
+      e.preventDefault();
+      openDialog();
+    }
+    // Escape: 关闭对话框
+    if (e.key === 'Escape') {
+      const dialog = document.getElementById('server-dialog');
+      if (dialog.style.display === 'flex') {
+        closeDialog();
+      }
+    }
+  });
+}
+
+function refreshCurrentPanel() {
+  const activeTab = document.querySelector('.tab.active');
+  if (!activeTab) return;
+  const tab = activeTab.dataset.tab;
+  if (tab === 'power') executePower('status');
+  else if (tab === 'sensor') executeSensor();
+  else if (tab === 'fru') executeCommand('fru list', 'output-fru');
+  else if (tab === 'sel') executeCommand('sel list', 'output-sel');
+  else if (tab === 'user') executeCommand('user list', 'output-user');
+  else if (tab === 'network') executeCommand('lan print', 'output-network');
+}
+
+function clearCurrentPanel() {
+  const activeTab = document.querySelector('.tab.active');
+  if (!activeTab) return;
+  const tab = activeTab.dataset.tab;
+  if (tab === 'sol') { if (terminal) terminal.clear(); }
+  else if (tab === 'power') clearOutput('output-power');
+  else if (tab === 'sensor') clearOutput('output-sensor');
+  else if (tab === 'fru') clearOutput('output-fru');
+  else if (tab === 'sel') clearOutput('output-sel');
+  else if (tab === 'user') clearOutput('output-user');
+  else if (tab === 'network') clearOutput('output-network');
+  else if (tab === 'raw') clearOutput('output-raw');
 }
 
 // ========== 事件绑定 ==========
@@ -140,7 +206,11 @@ function bindEvents() {
   document.getElementById('server-select').addEventListener('change', (e) => {
     const serverId = e.target.value;
     currentServer = config.servers.find(s => s.id === serverId) || null;
-    showStatus(currentServer ? `已选择: ${currentServer.name}` : '未选择服务器');
+    if (currentServer) {
+      showStatus('connected', `${currentServer.name}`);
+    } else {
+      showStatus('idle', '未选择服务器');
+    }
   });
 
   // 按钮事件
@@ -191,7 +261,11 @@ function openDialog(server = null) {
   document.getElementById('server-interface').value = server ? (server.interface || 'lanplus') : 'lanplus';
   document.getElementById('server-cipher').value = server ? (server.cipherSuite || 17) : 17;
 
-  document.getElementById('server-dialog').style.display = 'flex';
+  const dialog = document.getElementById('server-dialog');
+  dialog.style.display = 'flex';
+
+  // 自动聚焦第一个输入框
+  setTimeout(() => document.getElementById('server-name').focus(), 100);
 }
 
 function closeDialog() {
@@ -234,6 +308,7 @@ function saveServer() {
   // 选中新添加的服务器
   document.getElementById('server-select').value = serverData.id;
   currentServer = serverData;
+  showStatus('connected', serverData.name);
 }
 
 function deleteServer() {
@@ -248,6 +323,7 @@ function deleteServer() {
   saveConfigToFile();
   updateServerList();
   currentServer = null;
+  showStatus('idle', '未选择服务器');
 }
 
 // ========== SOL 操作 ==========
@@ -259,18 +335,25 @@ async function startSol() {
   }
 
   initTerminal();
-  showStatus('正在连接...');
 
-  const result = await ipcRenderer.invoke('sol:start', currentServer);
+  const btn = document.getElementById('btn-sol-start');
+  btn.classList.add('loading');
+  showStatus('connecting', '正在连接...');
 
-  if (result.success) {
-    solRunning = true;
-    showStatus(`已连接: ${currentServer.host}`);
-    updateSolButtons();
-    terminal.focus();
-  } else {
-    showStatus(`连接失败: ${result.error}`);
-    alert(`启动 SOL 失败:\n${result.error}`);
+  try {
+    const result = await ipcRenderer.invoke('sol:start', currentServer);
+
+    if (result.success) {
+      solRunning = true;
+      showStatus('connected', `${currentServer.name}`);
+      updateSolButtons();
+      terminal.focus();
+    } else {
+      showStatus('error', `连接失败`);
+      alert(`启动 SOL 失败:\n${result.error}`);
+    }
+  } finally {
+    btn.classList.remove('loading');
   }
 }
 
@@ -278,7 +361,7 @@ async function stopSol() {
   const result = await ipcRenderer.invoke('sol:stop');
   if (result.success) {
     solRunning = false;
-    showStatus('SOL 已停止');
+    showStatus('idle', 'SOL 已停止');
     updateSolButtons();
   }
 }
@@ -291,9 +374,9 @@ async function deactivateSol() {
 
   const result = await ipcRenderer.invoke('sol:deactivate', currentServer);
   if (result.success) {
-    showStatus('已发送 deactivate 命令');
+    showStatus('idle', '已发送 deactivate');
   } else {
-    showStatus(`deactivate 失败: ${result.error || result.stderr}`);
+    showStatus('error', 'deactivate 失败');
   }
 }
 
@@ -322,14 +405,14 @@ function saveSolLog() {
     }).then(result => {
       if (!result.canceled && result.filePath) {
         fs.writeFileSync(result.filePath, content, 'utf-8');
-        showStatus(`日志已保存: ${result.filePath}`);
+        showStatus('connected', `日志已保存`);
       }
     });
   } else {
     // 降级方案：保存到桌面
     const desktopPath = path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop', defaultName);
     fs.writeFileSync(desktopPath, content, 'utf-8');
-    showStatus(`日志已保存到桌面: ${desktopPath}`);
+    showStatus('connected', `已保存到桌面`);
   }
 }
 
@@ -345,9 +428,20 @@ async function executeCommand(command, outputId) {
     return;
   }
 
-  const result = await ipcRenderer.invoke('ipmi:execute', currentServer, command);
-  const output = result.code === 0 ? result.stdout : `错误: ${result.stderr}`;
-  document.getElementById(outputId).textContent = output;
+  const outputEl = document.getElementById(outputId);
+  const originalText = outputEl.textContent;
+  outputEl.textContent = '执行中...';
+  outputEl.style.opacity = '0.5';
+
+  try {
+    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, command);
+    const output = result.code === 0 ? result.stdout : `错误:\n${result.stderr}`;
+    outputEl.textContent = output || '(无输出)';
+    outputEl.style.opacity = '1';
+  } catch (err) {
+    outputEl.textContent = `执行异常: ${err.message}`;
+    outputEl.style.opacity = '1';
+  }
 }
 
 function executePower(action) {
@@ -369,8 +463,17 @@ function executeRawCommand() {
 
 // ========== 工具函数 ==========
 
-function showStatus(text) {
-  document.getElementById('status-text').textContent = text;
+/**
+ * 更新状态指示器
+ * @param {'idle'|'connected'|'connecting'|'error'|'disconnected'} state
+ * @param {string} text
+ */
+function showStatus(state = 'idle', text = '') {
+  const badge = document.getElementById('status-text');
+  badge.className = 'status-badge';
+  if (state === 'connected') badge.classList.add('connected');
+  else if (state === 'error') badge.classList.add('error');
+  badge.textContent = text || '未连接';
 }
 
 function clearOutput(elementId) {
@@ -379,7 +482,7 @@ function clearOutput(elementId) {
     const defaults = {
       'output-power': '点击按钮执行命令...',
       'output-sensor': '点击刷新获取传感器数据...',
-      'output-fru': '点击刷新获取FRU信息...',
+      'output-fru': '点击刷新获取 FRU 信息...',
       'output-sel': '点击刷新获取事件日志...',
       'output-user': '点击刷新获取用户列表...',
       'output-network': '点击刷新获取网络配置...',
