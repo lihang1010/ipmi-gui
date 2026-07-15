@@ -10,14 +10,15 @@ files:
   - "!example_servers.json"
 
 # 额外资源文件 - ipmitool 及其依赖
+# from 路径相对于项目根目录
 extraResources:
-  - from: "../ipmitool/ipmitool.exe"
+  - from: "D:/tools/ipmitool/ipmitool.exe"
     to: "ipmitool.exe"
-  - from: "../ipmitool/cygwin1.dll"
+  - from: "D:/tools/ipmitool/cygwin1.dll"
     to: "cygwin1.dll"
-  - from: "../ipmitool/cygcrypto-1.0.0.dll"
+  - from: "D:/tools/ipmitool/cygcrypto-1.0.0.dll"
     to: "cygcrypto-1.0.0.dll"
-  - from: "../ipmitool/cygz.dll"
+  - from: "D:/tools/ipmitool/cygz.dll"
     to: "cygz.dll"
 
 win:
