@@ -71,17 +71,17 @@ function buildArgs(server) {
 function getIpmiToolPath() {
   const exeDir = path.dirname(app.getPath('exe'));
 
-  // 打包后路径（按优先级查找）
+  // 按优先级查找
   const searchPaths = [
-    // 1. extraResources: resources/ipmitool.exe
-    path.join(exeDir, 'resources', 'ipmitool.exe'),
-    // 2. 安装目录同级
-    path.join(exeDir, 'ipmitool.exe'),
-    // 3. 上级目录
-    path.join(path.dirname(exeDir), 'ipmitool.exe'),
-    // 4. 开发模式：项目根目录的 ipmitool 文件夹
+    // 1. 打包后：resources/bin/ipmitool.exe
+    path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
+    // 2. 开发模式：项目 bin 目录
+    path.join(__dirname, 'bin', 'ipmitool.exe'),
+    // 3. 开发模式：上级 ipmitool 目录
     path.join(__dirname, '..', 'ipmitool', 'ipmitool.exe'),
-    // 5. 兜底（仅开发环境）
+    // 4. exe 同目录
+    path.join(exeDir, 'ipmitool.exe'),
+    // 5. 兜底
     'D:\\tools\\ipmitool\\ipmitool.exe'
   ];
 
@@ -92,7 +92,6 @@ function getIpmiToolPath() {
     }
   }
 
-  // 找不到时返回默认路径（会报错但给出提示）
   console.error('未找到 ipmitool.exe，尝试的路径:', searchPaths);
   return searchPaths[0];
 }
