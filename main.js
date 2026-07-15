@@ -52,9 +52,6 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-
-  // 开发时打开开发者工具
-  mainWindow.webContents.openDevTools();
 }
 
 // 构建 ipmitool 参数

@@ -222,7 +222,6 @@ function bindEvents() {
 
   document.getElementById('btn-sol-start').addEventListener('click', startSol);
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
-  document.getElementById('btn-sol-deactivate').addEventListener('click', deactivateSol);
   document.getElementById('btn-sol-save').addEventListener('click', saveSolLog);
   document.getElementById('btn-sol-clear').addEventListener('click', clearTerminal);
 
@@ -370,20 +369,6 @@ async function stopSol() {
     updateSolButtons();
   } else {
     showStatus('error', '停止失败');
-  }
-}
-
-async function deactivateSol() {
-  if (!currentServer) {
-    alert('请先选择服务器');
-    return;
-  }
-
-  const result = await ipcRenderer.invoke('sol:deactivate', currentServer);
-  if (result.success) {
-    showStatus('idle', '已发送 deactivate');
-  } else {
-    showStatus('error', 'deactivate 失败');
   }
 }
 
