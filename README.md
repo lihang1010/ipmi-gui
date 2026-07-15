@@ -15,52 +15,66 @@
 - **网络配置** - IPMI 网络参数配置
 - **原始命令** - 执行任意 ipmitool 命令
 
+### 特色功能
+
+- **服务器配置导入/导出** - JSON 格式，方便多台电脑同步
+- **日志目录自定义** - 可设置 SOL 日志保存位置
+- **配置记忆** - 自动记住上次保存目录
+- **SOL 日志录制** - 会话内容可保存到文件
+
 ### 技术优势
 
 - **node-pty** + **xterm.js** - 成熟的终端模拟方案（VS Code 同款）
 - **内嵌终端** - SOL 在 GUI 内运行，无需新开窗口
-- **日志录制** - 终端内容可保存到文件
 - **多服务器** - 支持保存多个服务器配置
 - **现代化 UI** - 深色主题，响应式布局
 
 ## 环境要求
 
+### 开发环境
+
 - **Node.js** >= 16.0
 - **npm** >= 8.0
-- **ipmitool.exe** - 需要在上级目录或系统 PATH 中
+
+### 运行环境（打包后）
+
+- **Windows** 10/11 x64
+- **管理员权限** - 需要以管理员身份运行（ipmitool 需要）
 
 ## 安装
 
-### 1. 克隆项目
+### 方式一：直接安装（推荐）
+
+1. 下载安装包 `IPMI管理工具-x.x.x-win-x64.exe`
+2. **右键 → 以管理员身份运行**
+3. 选择安装目录 → 完成
+
+### 方式二：便携版
+
+1. 下载 `IPMI管理工具-x.x.x-portable.exe`
+2. **右键 → 以管理员身份运行**
+3. 无需安装，直接使用
+
+### 方式三：开发模式
 
 ```bash
+# 1. 克隆项目
 git clone <repository-url>
 cd ipmi-gui-electron
-```
 
-### 2. 安装依赖
-
-```bash
+# 2. 安装依赖
 npm install
+
+# 3. 以管理员身份启动
+npm start
 ```
 
 **国内用户** - 使用淘宝镜像加速：
 
 ```bash
-# 设置 npm 镜像
 npm config set registry https://registry.npmmirror.com
-
-# 设置 Electron 镜像（在 PowerShell 中执行）
 $env:ELECTRON_MIRROR="https://registry.npmmirror.com/-/binary/electron/"
-
-# 安装依赖
 npm install
-```
-
-### 3. 启动应用
-
-```bash
-npm start
 ```
 
 ## 使用说明
@@ -78,22 +92,44 @@ npm start
    - **Cipher Suite**: 默认 17
 3. 点击 **"确定"** 保存
 
+### 导入/导出服务器配置
+
+**导出**：点击工具栏 **"导出"** → 选择保存位置 → 生成 JSON 文件
+
+**导入**：点击工具栏 **"导入"** → 选择 JSON 文件 → 自动合并配置
+
+导出格式示例：
+
+```json
+{
+  "exportTime": "2026-07-15T10:30:00.000Z",
+  "version": "1.0",
+  "servers": [
+    {
+      "name": "生产服务器-01",
+      "host": "192.168.1.100",
+      "username": "ADMIN",
+      "password": "password"
+    }
+  ]
+}
+```
+
 ### SOL 远程终端
 
 1. 在下拉框选择服务器
-2. 切换到 **"SOL"** 选项卡
+2. 切换到 **"SOL 终端"** 选项卡
 3. 点击 **"启动 SOL"** 按钮
-4. 在终端中进行操作：
-   - 直接输入命令
-   - 按 `Ctrl+E` 切换 SOL 模式
-   - 按 `Ctrl+]` 断开连接
-5. 点击 **"保存日志"** 导出会话记录
+4. 点击终端区域获取焦点，输入命令操作
+5. 点击 **"停止 SOL"** 断开连接
+6. 点击 **"日志目录"** 设置保存位置
+7. 点击 **"保存日志"** 导出会话记录
 
 ### 电源管理
 
 1. 切换到 **"电源"** 选项卡
 2. 点击相应按钮：
-   - **状态** - 查询当前电源状态
+   - **查询状态** - 查询当前电源状态
    - **开机** - Power On
    - **关机** - Power Off
    - **重启** - Power Cycle
@@ -104,6 +140,15 @@ npm start
 2. 在输入框输入 ipmitool 命令（如 `chassis status`）
 3. 按回车或点击 **"执行"** 按钮
 
+### 键盘快捷键
+
+| 快捷键 | 功能 |
+|--------|------|
+| `Ctrl+R` | 刷新当前面板 |
+| `Ctrl+L` | 清屏当前面板 |
+| `Ctrl+N` | 添加新服务器 |
+| `Esc` | 关闭对话框 |
+
 ## 项目结构
 
 ```
@@ -111,7 +156,8 @@ ipmi-gui-electron/
 ├── main.js              # Electron 主进程
 ├── preload.js           # 预加载脚本
 ├── package.json         # 项目配置
-├── build.yml            # electron-builder 配置
+├── build.yml           # electron-builder 配置
+├── example_servers.json # 导入示例文件
 ├── src/
 │   ├── index.html       # 主界面
 │   ├── renderer.js      # 渲染进程脚本
@@ -120,35 +166,37 @@ ipmi-gui-electron/
     └── icon.ico         # 应用图标
 ```
 
-## 开发
+## 打包发布
 
-### 调试模式
-
-应用启动时会自动打开开发者工具，可在 `main.js` 中注释/取消注释：
-
-```javascript
-// 开发时打开开发者工具
-mainWindow.webContents.openDevTools();
-```
-
-### 打包发布
+### NSIS 安装程序
 
 ```bash
-# 安装 electron-builder
-npm install electron-builder --save-dev
-
-# 打包 Windows 安装程序
 npm run build:win
 ```
 
+产出：`dist/IPMI管理工具-x.x.x-win-x64.exe`
+
+### 便携版
+
+```bash
+npx electron-builder --win portable
+```
+
+产出：`dist/IPMI管理工具-x.x.x-portable.exe`
+
+### 打包内容
+
+| 文件 | 说明 |
+|------|------|
+| IPMI管理工具.exe | 主程序 |
+| ipmitool.exe | IPMI 命令行工具 |
+| cygwin1.dll | Cygwin 运行库 |
+| cygcrypto-1.0.0.dll | 加密库 |
+| cygz.dll | 压缩库 |
+
 ## 配置文件
 
-配置保存在用户目录下：
-
-- **Windows**: `%APPDATA%\ipmi-gui\config.json`
-- **macOS/Linux**: `~/.config/ipmi-gui/config.json`
-
-配置格式：
+配置保存在：`%APPDATA%\ipmi-gui\config.json`
 
 ```json
 {
@@ -165,11 +213,19 @@ npm run build:win
       "privilegeLevel": "ADMINISTRATOR"
     }
   ],
-  "settings": {}
+  "settings": {
+    "lastSaveDir": "C:\\Users\\xxx\\Desktop"
+  }
 }
 ```
 
 ## 常见问题
+
+### 需要管理员权限
+
+**问题**: 提示权限不足或无法执行 ipmitool
+
+**解决方案**: 右键应用图标 → **以管理员身份运行**
 
 ### Electron 安装失败
 
@@ -194,6 +250,7 @@ npm run build:win
 2. 检查用户名密码是否正确
 3. 尝试切换接口类型（`lan` 或 `lanplus`）
 4. 检查 Cipher Suite 设置
+5. 确认以管理员身份运行
 
 ### 终端显示异常
 
@@ -213,6 +270,7 @@ npm run build:win
 | xterm | ^5.3.0 | 终端模拟器组件 |
 | @xterm/addon-fit | ^0.10.0 | 自适应尺寸插件 |
 | @xterm/addon-serialize | ^0.12.0 | 终端内容序列化插件 |
+| electron-builder | ^24.0.0 | 打包工具 |
 
 ## 许可证
 
