@@ -385,7 +385,7 @@ async function stopSol() {
   }
 }
 
-function saveSolLog() {
+async function saveSolLog() {
   if (!serializeAddon) {
     alert('终端未初始化');
     return;
@@ -404,25 +404,14 @@ function saveSolLog() {
   // 使用配置的日志目录
   const defaultPath = path.join(getLogDir(), defaultName);
 
-  // 使用原生保存对话框
-  const { dialog } = require('electron').remote || {};
-  if (dialog) {
-    dialog.showSaveDialog({
-      defaultPath: defaultPath,
-      filters: [{ name: '日志文件', extensions: ['log', 'txt'] }, { name: '所有文件', extensions: ['*'] }]
-    }).then(result => {
-      if (!result.canceled && result.filePath) {
-        fs.writeFileSync(result.filePath, content, 'utf-8');
-        // 记住本次保存目录
-        config.settings = config.settings || {};
-        config.settings.lastSaveDir = path.dirname(result.filePath);
-        saveConfigToFile();
-        showStatus('connected', `日志已保存`);
-      }
-    });
-  } else {
-    fs.writeFileSync(defaultPath, content, 'utf-8');
-    showStatus('connected', `已保存到桌面`);
+  // 通过 IPC 调用保存对话框
+  const result = await ipcRenderer.invoke('file:save', defaultPath, content);
+  if (result.success) {
+    // 记住本次保存目录
+    config.settings = config.settings || {};
+    config.settings.lastSaveDir = path.dirname(result.path);
+    saveConfigToFile();
+    showStatus('connected', `日志已保存`);
   }
 }
 
@@ -440,29 +429,15 @@ function getLogDir() {
 function updateLogDirDisplay() {
   const el = document.getElementById('sol-logdir-text');
   if (el) {
-    const dir = getLogDir();
-    // 只显示最后两级目录
-    const parts = dir.replace(/\\/g, '/').split('/');
-    const short = parts.length > 2 ? '...' + parts.slice(-2).join('/') : dir;
-    el.textContent = short;
-    el.title = dir;
+    el.textContent = getLogDir();
   }
 }
 
 async function selectLogDir() {
-  const { dialog } = require('electron').remote || {};
-  if (!dialog) return;
-
-  const currentDir = getLogDir();
-  const result = await dialog.showOpenDialog({
-    properties: ['openDirectory'],
-    defaultPath: currentDir,
-    title: '选择日志保存目录'
-  });
-
-  if (!result.canceled && result.filePaths.length > 0) {
+  const selectedDir = await ipcRenderer.invoke('dialog:selectDirectory');
+  if (selectedDir) {
     config.settings = config.settings || {};
-    config.settings.lastSaveDir = result.filePaths[0];
+    config.settings.lastSaveDir = selectedDir;
     saveConfigToFile();
     updateLogDirDisplay();
     showStatus('connected', `日志目录已更新`);
