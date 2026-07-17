@@ -351,16 +351,21 @@ function saveServer() {
 function deleteServer() {
   if (!currentServer) {
     alert('请先选择服务器');
+    resetFocus();
     return;
   }
 
-  if (!confirm(`确定删除服务器 "${currentServer.name}" 吗?`)) return;
+  if (!confirm(`确定删除服务器 "${currentServer.name}" 吗?`)) {
+    resetFocus();
+    return;
+  }
 
   config.servers = config.servers.filter(s => s.id !== currentServer.id);
   saveConfigToFile();
   updateServerList();
   currentServer = null;
   showStatus('idle', '未选择服务器');
+  resetFocus();
 }
 
 // ========== 导入导出 ==========
@@ -421,7 +426,10 @@ async function importConfig() {
       `点击"取消"放弃导入`
     );
 
-    if (!action) return;
+    if (!action) {
+      resetFocus();
+      return;
+    }
 
     // 合并配置（跳过重复的）
     let imported = 0;
@@ -437,8 +445,10 @@ async function importConfig() {
     saveConfigToFile();
     updateServerList();
     showStatus('connected', `已导入 ${imported} 个服务器`);
+    resetFocus();
   } catch (err) {
     alert(`导入失败: ${err.message}`);
+    resetFocus();
   }
 }
 
@@ -606,13 +616,17 @@ function deleteSelectedFavorite() {
   if (selectedFavIndex < 0) return;
 
   const fav = favorites[selectedFavIndex];
-  if (!confirm(`确定删除收藏 "${fav.name}" 吗?`)) return;
 
+  // 直接删除，不使用 confirm() 以避免焦点问题
   favorites.splice(selectedFavIndex, 1);
   selectedFavIndex = -1;
   saveFavorites();
   renderFavorites();
   updateFavoriteButtons();
+
+  // 重新聚焦到收藏夹列表
+  const list = document.getElementById('favorites-list');
+  if (list) list.focus();
 }
 
 function executeSelectedFavorite() {
@@ -834,6 +848,25 @@ function executeRawCommand() {
 }
 
 // ========== 工具函数 ==========
+
+/**
+ * 重置焦点状态 - 修复 confirm/alert 后输入框无法聚焦的问题
+ */
+function resetFocus() {
+  // 移除所有焦点
+  if (document.activeElement) {
+    document.activeElement.blur();
+  }
+
+  // 确保终端 textarea 不会拦截输入
+  if (terminal && terminal.textarea) {
+    terminal.textarea.blur();
+    // 不禁用 textarea，只确保它没有焦点
+  }
+
+  // 将焦点设置到 body
+  document.body.focus();
+}
 
 /**
  * 更新状态指示器
