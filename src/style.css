@@ -621,6 +621,17 @@ body {
 /* xterm.js textarea 不要干扰对话框 */
 .xterm-helper-textarea {
   z-index: -1 !important;
+  pointer-events: none !important;
+}
+
+/* 对话框打开时禁用终端事件 */
+body.dialog-open .terminal-container,
+body.dialog-open #terminal {
+  pointer-events: none !important;
+}
+
+body.dialog-open .xterm-helper-textarea {
+  display: none !important;
 }
 
 @keyframes overlayFadeIn {

@@ -278,36 +278,23 @@ function openDialog(server = null) {
   document.getElementById('server-interface').value = server ? (server.interface || 'lanplus') : 'lanplus';
   document.getElementById('server-cipher').value = server ? (server.cipherSuite || 17) : 17;
 
-  // 彻底移除终端焦点
-  if (terminal) {
-    terminal.blur();
-    const textarea = terminal.textarea;
-    if (textarea) {
-      textarea.blur();
-      textarea.disabled = true;
-    }
-  }
+  // 禁用终端事件
+  document.body.classList.add('dialog-open');
 
   const dialog = document.getElementById('server-dialog');
   dialog.style.display = 'flex';
 
-  // 多次尝试聚焦
+  // 聚焦输入框
   const nameInput = document.getElementById('server-name');
   nameInput.focus();
-  setTimeout(() => {
-    nameInput.focus();
-    nameInput.click();
-  }, 100);
+  setTimeout(() => nameInput.focus(), 50);
 }
 
 function closeDialog() {
   document.getElementById('server-dialog').style.display = 'none';
   editingServerId = null;
-
-  // 恢复终端 textarea
-  if (terminal && terminal.textarea) {
-    terminal.textarea.disabled = false;
-  }
+  document.body.classList.remove('dialog-open');
+  resetFocus();
 }
 
 function saveServer() {
@@ -554,35 +541,22 @@ function openFavDialog(fav = null, index = -1) {
   document.getElementById('fav-command').value = fav ? fav.command : '';
   document.getElementById('fav-desc').value = fav ? (fav.desc || '') : '';
 
-  // 彻底移除终端焦点
-  if (terminal) {
-    terminal.blur();
-    const textarea = terminal.textarea;
-    if (textarea) {
-      textarea.blur();
-      textarea.disabled = true;
-    }
-  }
+  // 禁用终端事件
+  document.body.classList.add('dialog-open');
 
   document.getElementById('favorite-dialog').style.display = 'flex';
 
-  // 多次尝试聚焦
+  // 聚焦输入框
   const nameInput = document.getElementById('fav-name');
   nameInput.focus();
-  setTimeout(() => {
-    nameInput.focus();
-    nameInput.click();
-  }, 100);
+  setTimeout(() => nameInput.focus(), 50);
 }
 
 function closeFavDialog() {
   document.getElementById('favorite-dialog').style.display = 'none';
   editingFavIndex = -1;
-
-  // 恢复终端 textarea
-  if (terminal && terminal.textarea) {
-    terminal.textarea.disabled = false;
-  }
+  document.body.classList.remove('dialog-open');
+  resetFocus();
 }
 
 function saveFavorite() {
@@ -873,7 +847,9 @@ function resetFocus() {
  * 安全的 alert - 显示后自动重置焦点
  */
 function safeAlert(msg) {
+  document.body.classList.add('dialog-open');
   window.alert(msg);
+  document.body.classList.remove('dialog-open');
   resetFocus();
 }
 
@@ -881,7 +857,9 @@ function safeAlert(msg) {
  * 安全的 confirm - 确认后自动重置焦点
  */
 function safeConfirm(msg) {
+  document.body.classList.add('dialog-open');
   const result = window.confirm(msg);
+  document.body.classList.remove('dialog-open');
   resetFocus();
   return result;
 }
