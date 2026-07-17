@@ -103,12 +103,9 @@ function getIpmiToolPath() {
 
   for (const p of searchPaths) {
     if (fs.existsSync(p)) {
-      console.log('找到 ipmitool:', p);
       return p;
     }
   }
-
-  console.error('未找到 ipmitool.exe，尝试的路径:', searchPaths);
   return searchPaths[0];
 }
 
