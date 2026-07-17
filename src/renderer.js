@@ -315,7 +315,7 @@ function saveServer() {
   const host = document.getElementById('server-host').value.trim();
 
   if (!name || !host) {
-    alert('请填写名称和IP地址');
+    safeAlert('请填写名称和IP地址');
     return;
   }
 
@@ -350,12 +350,12 @@ function saveServer() {
 
 function deleteServer() {
   if (!currentServer) {
-    alert('请先选择服务器');
+    safeAlert('请先选择服务器');
     resetFocus();
     return;
   }
 
-  if (!confirm(`确定删除服务器 "${currentServer.name}" 吗?`)) {
+  if (!safeConfirm(`确定删除服务器 "${currentServer.name}" 吗?`)) {
     resetFocus();
     return;
   }
@@ -372,7 +372,7 @@ function deleteServer() {
 
 async function exportConfig() {
   if (!config.servers || config.servers.length === 0) {
-    alert('没有可导出的服务器配置');
+    safeAlert('没有可导出的服务器配置');
     return;
   }
 
@@ -408,7 +408,7 @@ async function importConfig() {
     const importData = JSON.parse(content);
 
     if (!importData.servers || !Array.isArray(importData.servers)) {
-      alert('无效的配置文件格式');
+      safeAlert('无效的配置文件格式');
       return;
     }
 
@@ -416,11 +416,11 @@ async function importConfig() {
     const validServers = importData.servers.filter(s => s.name && s.host);
 
     if (validServers.length === 0) {
-      alert('配置文件中没有有效的服务器');
+      safeAlert('配置文件中没有有效的服务器');
       return;
     }
 
-    const action = confirm(
+    const action = safeConfirm(
       `找到 ${validServers.length} 个服务器配置。\n\n` +
       `点击"确定"合并到现有配置\n` +
       `点击"取消"放弃导入`
@@ -447,7 +447,7 @@ async function importConfig() {
     showStatus('connected', `已导入 ${imported} 个服务器`);
     resetFocus();
   } catch (err) {
-    alert(`导入失败: ${err.message}`);
+    safeAlert(`导入失败: ${err.message}`);
     resetFocus();
   }
 }
@@ -456,7 +456,8 @@ async function importConfig() {
 
 async function testConnection() {
   if (!currentServer) {
-    alert('请先选择服务器');
+    safeAlert('请先选择服务器');
+    resetFocus();
     return;
   }
 
@@ -470,16 +471,17 @@ async function testConnection() {
 
     if (result.code === 0 && result.stdout.trim()) {
       showStatus('connected', `${currentServer.name} - 连接正常`);
-      alert(`连接测试成功!\n\n服务器: ${currentServer.name}\nIP: ${currentServer.host}\n\n响应: ${result.stdout.trim()}`);
+      safeAlert(`连接测试成功!\n\n服务器: ${currentServer.name}\nIP: ${currentServer.host}\n\n响应: ${result.stdout.trim()}`);
     } else {
       showStatus('error', `${currentServer.name} - 连接失败`);
-      alert(`连接测试失败!\n\n服务器: ${currentServer.name}\nIP: ${currentServer.host}\n\n错误: ${result.stderr || '无响应'}`);
+      safeAlert(`连接测试失败!\n\n服务器: ${currentServer.name}\nIP: ${currentServer.host}\n\n错误: ${result.stderr || '无响应'}`);
     }
   } catch (err) {
     showStatus('error', '测试异常');
-    alert(`连接测试异常: ${err.message}`);
+    safeAlert(`连接测试异常: ${err.message}`);
   } finally {
     btn.classList.remove('loading');
+    resetFocus();
   }
 }
 
@@ -589,7 +591,7 @@ function saveFavorite() {
   const desc = document.getElementById('fav-desc').value.trim();
 
   if (!name || !command) {
-    alert('请填写名称和命令');
+    safeAlert('请填写名称和命令');
     return;
   }
 
@@ -617,7 +619,7 @@ function deleteSelectedFavorite() {
 
   const fav = favorites[selectedFavIndex];
 
-  // 直接删除，不使用 confirm() 以避免焦点问题
+  // 直接删除，不使用 safeConfirm() 以避免焦点问题
   favorites.splice(selectedFavIndex, 1);
   selectedFavIndex = -1;
   saveFavorites();
@@ -637,7 +639,7 @@ function executeSelectedFavorite() {
 
 async function executeFavorite(index) {
   if (!currentServer) {
-    alert('请先选择服务器');
+    safeAlert('请先选择服务器');
     return;
   }
 
@@ -662,7 +664,7 @@ async function executeFavorite(index) {
     showStatus('connected', `${fav.name} 执行完成`);
   } catch (err) {
     showStatus('error', '执行失败');
-    alert(`执行失败: ${err.message}`);
+    safeAlert(`执行失败: ${err.message}`);
   }
 }
 
@@ -693,7 +695,7 @@ function escapeHtml(text) {
 
 async function startSol() {
   if (!currentServer) {
-    alert('请先选择服务器');
+    safeAlert('请先选择服务器');
     return;
   }
 
@@ -713,7 +715,7 @@ async function startSol() {
       terminal.focus();
     } else {
       showStatus('error', `连接失败`);
-      alert(`启动 SOL 失败:\n${result.error}`);
+      safeAlert(`启动 SOL 失败:\n${result.error}`);
     }
   } finally {
     btn.classList.remove('loading');
@@ -722,7 +724,7 @@ async function startSol() {
 
 async function stopSol() {
   if (!currentServer) {
-    alert('请先选择服务器');
+    safeAlert('请先选择服务器');
     return;
   }
 
@@ -738,7 +740,7 @@ async function stopSol() {
     } else {
       showStatus('error', '停止失败');
       const msg = result.stderr || result.error || '未知错误';
-      alert(`停止 SOL 失败:\n${msg}`);
+      safeAlert(`停止 SOL 失败:\n${msg}`);
     }
   } finally {
     btn.classList.remove('loading');
@@ -747,7 +749,7 @@ async function stopSol() {
 
 async function saveSolLog() {
   if (!serializeAddon) {
-    alert('终端未初始化');
+    safeAlert('终端未初始化');
     return;
   }
 
@@ -810,7 +812,7 @@ async function selectLogDir() {
 
 async function executeCommand(command, outputId) {
   if (!currentServer) {
-    alert('请先选择服务器');
+    safeAlert('请先选择服务器');
     return;
   }
 
@@ -841,7 +843,7 @@ function executeSensor() {
 function executeRawCommand() {
   const command = document.getElementById('raw-command').value.trim();
   if (!command) {
-    alert('请输入命令');
+    safeAlert('请输入命令');
     return;
   }
   executeCommand(command, 'output-raw');
@@ -850,7 +852,7 @@ function executeRawCommand() {
 // ========== 工具函数 ==========
 
 /**
- * 重置焦点状态 - 修复 confirm/alert 后输入框无法聚焦的问题
+ * 重置焦点状态 - 修复 safeConfirm/safeAlert 后输入框无法聚焦的问题
  */
 function resetFocus() {
   // 移除所有焦点
@@ -861,11 +863,27 @@ function resetFocus() {
   // 确保终端 textarea 不会拦截输入
   if (terminal && terminal.textarea) {
     terminal.textarea.blur();
-    // 不禁用 textarea，只确保它没有焦点
   }
 
   // 将焦点设置到 body
   document.body.focus();
+}
+
+/**
+ * 安全的 alert - 显示后自动重置焦点
+ */
+function safeAlert(msg) {
+  window.alert(msg);
+  resetFocus();
+}
+
+/**
+ * 安全的 confirm - 确认后自动重置焦点
+ */
+function safeConfirm(msg) {
+  const result = window.confirm(msg);
+  resetFocus();
+  return result;
 }
 
 /**
