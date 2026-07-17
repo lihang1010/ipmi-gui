@@ -274,6 +274,10 @@ function bindEvents() {
   document.getElementById('btn-import-config').addEventListener('click', importConfig);
   document.getElementById('btn-export-config').addEventListener('click', exportConfig);
 
+  // 分组相关
+  document.getElementById('btn-group-manage').addEventListener('click', openGroupManageDialog);
+  document.getElementById('group-filter').addEventListener('change', () => updateServerList());
+
   document.getElementById('btn-sol-start').addEventListener('click', startSol);
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
   document.getElementById('btn-sol-save').addEventListener('click', saveSolLog);
@@ -290,21 +294,250 @@ function bindEvents() {
   document.getElementById('raw-command').addEventListener('keypress', (e) => { if (e.key === 'Enter') executeRawCommand(); });
 
   updateLogDirDisplay();
+  updateGroupFilter();
+  updateGroupSelect();
   loadFavorites();
   initTerminal();
+}
+
+// ========== 分组管理 ==========
+
+let editingGroupId = null;
+let selectedGroupColor = '#4caf7c';
+
+function getGroups() {
+  return config.groups || [];
+}
+
+function getGroupById(groupId) {
+  return getGroups().find(g => g.id === groupId) || null;
+}
+
+function getGroupServers(groupId) {
+  if (!groupId) return (config.servers || []).filter(s => !s.groupId);
+  return (config.servers || []).filter(s => s.groupId === groupId);
+}
+
+function updateGroupFilter() {
+  const select = document.getElementById('group-filter');
+  const groups = getGroups();
+  select.innerHTML = '<option value="">全部</option>';
+  groups.forEach(group => {
+    const count = getGroupServers(group.id).length;
+    const opt = document.createElement('option');
+    opt.value = group.id;
+    opt.textContent = group.name + ' (' + count + ')';
+    select.appendChild(opt);
+  });
+}
+
+function updateGroupSelect() {
+  const select = document.getElementById('server-group');
+  if (!select) return;
+  const groups = getGroups();
+  select.innerHTML = '<option value="">未分组</option>';
+  groups.forEach(group => {
+    const opt = document.createElement('option');
+    opt.value = group.id;
+    opt.textContent = group.name;
+    select.appendChild(opt);
+  });
+}
+
+function renderGroupList() {
+  const list = document.getElementById('group-list');
+  const groups = getGroups();
+
+  if (groups.length === 0) {
+    list.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:20px;">暂无分组</div>';
+    return;
+  }
+
+  list.innerHTML = groups.map(group => {
+    const count = getGroupServers(group.id).length;
+    return `
+      <div class="group-item">
+        <div class="group-color-dot" style="background:${group.color || '#888'}"></div>
+        <div class="group-info">
+          <div class="group-name">${escapeHtml(group.name)}</div>
+          <div class="group-count">${count} 台服务器</div>
+        </div>
+        <div class="group-actions">
+          <button class="btn btn-sm" onclick="editGroup('${group.id}')">编辑</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteGroup('${group.id}')">删除</button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openGroupManageDialog() {
+  renderGroupList();
+  document.getElementById('group-manage-dialog').style.display = 'flex';
+}
+
+function closeGroupManageDialog() {
+  document.getElementById('group-manage-dialog').style.display = 'none';
+}
+
+function openGroupEditDialog(group = null) {
+  editingGroupId = group ? group.id : null;
+  document.getElementById('group-dialog-title').textContent = group ? '编辑分组' : '添加分组';
+  document.getElementById('group-name').value = group ? group.name : '';
+
+  // 设置颜色
+  const color = group ? (group.color || '#4caf7c') : '#4caf7c';
+  selectedGroupColor = color;
+  document.querySelectorAll('.color-option').forEach(el => {
+    el.classList.toggle('selected', el.dataset.color === color);
+  });
+  document.getElementById('group-custom-color').value = color;
+
+  document.getElementById('group-edit-dialog').style.display = 'flex';
+  setTimeout(() => document.getElementById('group-name').focus(), 50);
+}
+
+function closeGroupEditDialog() {
+  document.getElementById('group-edit-dialog').style.display = 'none';
+  editingGroupId = null;
+}
+
+function selectGroupColor(el) {
+  const color = el.dataset ? el.dataset.color : el.value;
+  selectedGroupColor = color;
+  document.querySelectorAll('.color-option').forEach(opt => {
+    opt.classList.toggle('selected', opt.dataset.color === color);
+  });
+  document.getElementById('group-custom-color').value = color;
+}
+
+async function saveGroup() {
+  const name = document.getElementById('group-name').value.trim();
+  if (!name) {
+    await safeAlert('请输入分组名称');
+    return;
+  }
+
+  const groups = getGroups();
+
+  if (editingGroupId) {
+    const group = groups.find(g => g.id === editingGroupId);
+    if (group) {
+      group.name = name;
+      group.color = selectedGroupColor;
+    }
+  } else {
+    groups.push({
+      id: 'group-' + Date.now(),
+      name: name,
+      color: selectedGroupColor,
+      sortOrder: groups.length
+    });
+  }
+
+  config.groups = groups;
+  saveConfigToFile();
+  updateGroupFilter();
+  updateGroupSelect();
+  updateServerList();
+  closeGroupEditDialog();
+  renderGroupList();
+}
+
+function editGroup(groupId) {
+  const group = getGroupById(groupId);
+  if (group) {
+    closeGroupManageDialog();
+    setTimeout(() => openGroupEditDialog(group), 100);
+  }
+}
+
+async function deleteGroup(groupId) {
+  const group = getGroupById(groupId);
+  if (!group) return;
+
+  const ok = await safeConfirm('确定删除分组 "' + group.name + '" 吗?\n\n该分组下的服务器将变为"未分组"');
+  if (!ok) return;
+
+  // 将分组下的服务器设为未分组
+  config.servers.forEach(server => {
+    if (server.groupId === groupId) {
+      server.groupId = '';
+    }
+  });
+
+  // 删除分组
+  config.groups = getGroups().filter(g => g.id !== groupId);
+  saveConfigToFile();
+  updateGroupFilter();
+  updateGroupSelect();
+  updateServerList();
+  renderGroupList();
 }
 
 // ========== 服务器管理 ==========
 
 function updateServerList() {
   const select = document.getElementById('server-select');
+  const filterGroupId = document.getElementById('group-filter').value;
+
   select.innerHTML = '<option value="">-- 选择服务器 --</option>';
-  config.servers.forEach(server => {
-    const opt = document.createElement('option');
-    opt.value = server.id;
-    opt.textContent = server.name + ' (' + server.host + ')';
-    select.appendChild(opt);
-  });
+
+  const servers = config.servers || [];
+  const groups = getGroups();
+
+  if (filterGroupId) {
+    // 显示指定分组的服务器
+    const filtered = servers.filter(s => s.groupId === filterGroupId);
+    filtered.forEach(server => {
+      const opt = document.createElement('option');
+      opt.value = server.id;
+      opt.textContent = server.name + ' (' + server.host + ')';
+      select.appendChild(opt);
+    });
+  } else {
+    // 按分组分组显示
+    const grouped = {};
+    const ungrouped = [];
+
+    servers.forEach(server => {
+      if (server.groupId) {
+        if (!grouped[server.groupId]) {
+          grouped[server.groupId] = { group: getGroupById(server.groupId), servers: [] };
+        }
+        grouped[server.groupId].servers.push(server);
+      } else {
+        ungrouped.push(server);
+      }
+    });
+
+    // 渲染分组
+    Object.values(grouped).forEach(({ group, servers: groupServers }) => {
+      if (!group) return;
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = group.name + ' (' + groupServers.length + ')';
+      groupServers.forEach(server => {
+        const opt = document.createElement('option');
+        opt.value = server.id;
+        opt.textContent = server.name + ' (' + server.host + ')';
+        optgroup.appendChild(opt);
+      });
+      select.appendChild(optgroup);
+    });
+
+    // 渲染未分组
+    if (ungrouped.length > 0) {
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = '未分组 (' + ungrouped.length + ')';
+      ungrouped.forEach(server => {
+        const opt = document.createElement('option');
+        opt.value = server.id;
+        opt.textContent = server.name + ' (' + server.host + ')';
+        optgroup.appendChild(opt);
+      });
+      select.appendChild(optgroup);
+    }
+  }
 }
 
 function openDialog(server = null) {
@@ -317,6 +550,7 @@ function openDialog(server = null) {
   document.getElementById('server-password').value = server ? server.password : '';
   document.getElementById('server-interface').value = server ? (server.interface || 'lanplus') : 'lanplus';
   document.getElementById('server-cipher').value = server ? (server.cipherSuite || 17) : 17;
+  document.getElementById('server-group').value = server ? (server.groupId || '') : '';
   if (terminal) terminal.blur();
   document.getElementById('server-dialog').style.display = 'flex';
   setTimeout(() => document.getElementById('server-name').focus(), 50);
@@ -332,6 +566,7 @@ function saveServer() {
   const host = document.getElementById('server-host').value.trim();
   if (!name || !host) { safeAlert('请填写名称和IP地址'); return; }
 
+  const groupId = document.getElementById('server-group').value;
   const serverData = {
     id: editingServerId || Date.now().toString(),
     name, host,
@@ -340,7 +575,8 @@ function saveServer() {
     password: document.getElementById('server-password').value,
     interface: document.getElementById('server-interface').value,
     cipherSuite: parseInt(document.getElementById('server-cipher').value) || 17,
-    privilegeLevel: 'ADMINISTRATOR'
+    privilegeLevel: 'ADMINISTRATOR',
+    groupId: groupId || ''
   };
 
   if (editingServerId) {
@@ -351,6 +587,7 @@ function saveServer() {
   }
 
   saveConfigToFile();
+  updateGroupFilter();
   updateServerList();
   closeDialog();
   document.getElementById('server-select').value = serverData.id;

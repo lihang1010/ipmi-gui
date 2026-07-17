@@ -13,6 +13,12 @@
     <!-- Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
+        <label>分组</label>
+        <select id="group-filter">
+          <option value="">全部</option>
+        </select>
+        <button id="btn-group-manage" class="btn btn-sm" data-tooltip="管理分组">分组管理</button>
+        <span class="separator"></span>
         <label>服务器</label>
         <select id="server-select">
           <option value="">-- 选择服务器 --</option>
@@ -222,10 +228,65 @@
           <label>Cipher Suite</label>
           <input type="number" id="server-cipher" value="17" min="0" max="17">
         </div>
+        <div class="form-group">
+          <label>分组</label>
+          <select id="server-group">
+            <option value="">未分组</option>
+          </select>
+        </div>
       </div>
       <div class="dialog-footer">
         <button class="btn" onclick="closeDialog()">取消</button>
         <button class="btn btn-primary" onclick="saveServer()">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Group Management Dialog -->
+  <div id="group-manage-dialog" class="dialog-overlay" style="display: none;">
+    <div class="dialog" style="width: 450px;">
+      <div class="dialog-header">
+        <h3>分组管理</h3>
+        <button class="dialog-close" onclick="closeGroupManageDialog()">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <div id="group-list" class="group-list"></div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn btn-primary" onclick="openGroupEditDialog()">添加分组</button>
+        <button class="btn" onclick="closeGroupManageDialog()">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Group Edit Dialog -->
+  <div id="group-edit-dialog" class="dialog-overlay" style="display: none;">
+    <div class="dialog" style="width: 380px;">
+      <div class="dialog-header">
+        <h3 id="group-dialog-title">添加分组</h3>
+        <button class="dialog-close" onclick="closeGroupEditDialog()">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <div class="form-group">
+          <label>分组名称</label>
+          <input type="text" id="group-name" placeholder="例: 生产环境">
+        </div>
+        <div class="form-group">
+          <label>分组颜色</label>
+          <div class="color-picker">
+            <div class="color-option selected" data-color="#4caf7c" style="background:#4caf7c" onclick="selectGroupColor(this)"></div>
+            <div class="color-option" data-color="#e0a33e" style="background:#e0a33e" onclick="selectGroupColor(this)"></div>
+            <div class="color-option" data-color="#5b9bd5" style="background:#5b9bd5" onclick="selectGroupColor(this)"></div>
+            <div class="color-option" data-color="#9c27b0" style="background:#9c27b0" onclick="selectGroupColor(this)"></div>
+            <div class="color-option" data-color="#e05561" style="background:#e05561" onclick="selectGroupColor(this)"></div>
+            <div class="color-option" data-color="#888888" style="background:#888888" onclick="selectGroupColor(this)"></div>
+            <input type="color" id="group-custom-color" value="#4caf7c" onchange="selectGroupColor(this)">
+          </div>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn" onclick="closeGroupEditDialog()">取消</button>
+        <button class="btn btn-primary" onclick="saveGroup()">确定</button>
       </div>
     </div>
   </div>

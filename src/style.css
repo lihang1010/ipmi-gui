@@ -306,6 +306,88 @@ body {
   opacity: 0.5;
 }
 
+/* Group Management */
+.group-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.group-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-sm);
+  transition: background var(--transition-fast);
+}
+
+.group-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.group-color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.group-info {
+  flex: 1;
+}
+
+.group-name {
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.group-count {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.group-actions {
+  display: flex;
+  gap: var(--space-xs);
+}
+
+.color-picker {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.color-option {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: all var(--transition-fast);
+}
+
+.color-option:hover {
+  transform: scale(1.1);
+}
+
+.color-option.selected {
+  border-color: var(--text-primary);
+  box-shadow: 0 0 0 2px var(--bg-app);
+}
+
+#group-custom-color {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  background: transparent;
+}
+
 /* --- Tabs --- */
 .tabs {
   display: flex;
