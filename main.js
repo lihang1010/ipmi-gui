@@ -3,9 +3,21 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 
-// 禁用 GPU 缓存警告
-app.commandLine.appendSwitch('disk-cache-size', '0');
-app.commandLine.appendSwitch('disable-gpu-cache');
+// 禁用 GPU 和缓存相关警告
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('disk-cache-size', '1');
+app.commandLine.appendSwitch('media-cache-size', '1');
+
+// 重定向 stderr 过滤缓存警告
+const originalStderrWrite = process.stderr.write;
+process.stderr.write = function(chunk, ...args) {
+  const str = chunk.toString();
+  if (str.includes('cache_util_win') || str.includes('disk_cache') || str.includes('gpu_disk_cache')) {
+    return true;
+  }
+  return originalStderrWrite.call(this, chunk, ...args);
+};
 
 let mainWindow;
 let ptyProcess = null;
