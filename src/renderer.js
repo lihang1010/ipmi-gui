@@ -332,9 +332,12 @@ function applyTemplate() {
   document.getElementById('server-interface').value = template.interface;
   document.getElementById('server-cipher').value = template.cipherSuite;
 
-  // 如果名称为空，自动填充模板名称
+  // 自动填充名称: 模板名-IP地址
+  const host = document.getElementById('server-host').value.trim();
   const nameInput = document.getElementById('server-name');
-  if (!nameInput.value.trim()) {
+  if (host) {
+    nameInput.value = template.name + '-' + host;
+  } else if (!nameInput.value.trim()) {
     nameInput.value = template.name;
   }
 }
