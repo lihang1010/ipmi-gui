@@ -3,6 +3,10 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 
+// 禁用 GPU 缓存警告
+app.commandLine.appendSwitch('disk-cache-size', '0');
+app.commandLine.appendSwitch('disable-gpu-cache');
+
 let mainWindow;
 let ptyProcess = null;
 let configPath = path.join(app.getPath('userData'), 'config.json');
