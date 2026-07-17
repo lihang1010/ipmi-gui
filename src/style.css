@@ -606,8 +606,21 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  z-index: 9999;
   animation: overlayFadeIn 0.15s ease;
+}
+
+/* 确保对话框输入框可以聚焦 */
+.dialog-overlay input,
+.dialog-overlay select,
+.dialog-overlay textarea,
+.dialog-overlay button {
+  -webkit-app-region: no-drag;
+}
+
+/* xterm.js textarea 不要干扰对话框 */
+.xterm-helper-textarea {
+  z-index: -1 !important;
 }
 
 @keyframes overlayFadeIn {

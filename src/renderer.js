@@ -278,20 +278,36 @@ function openDialog(server = null) {
   document.getElementById('server-interface').value = server ? (server.interface || 'lanplus') : 'lanplus';
   document.getElementById('server-cipher').value = server ? (server.cipherSuite || 17) : 17;
 
-  // 先移除终端焦点
-  if (terminal) terminal.blur();
-  document.activeElement.blur();
+  // 彻底移除终端焦点
+  if (terminal) {
+    terminal.blur();
+    const textarea = terminal.textarea;
+    if (textarea) {
+      textarea.blur();
+      textarea.disabled = true;
+    }
+  }
 
   const dialog = document.getElementById('server-dialog');
   dialog.style.display = 'flex';
 
-  // 自动聚焦第一个输入框
-  setTimeout(() => document.getElementById('server-name').focus(), 50);
+  // 多次尝试聚焦
+  const nameInput = document.getElementById('server-name');
+  nameInput.focus();
+  setTimeout(() => {
+    nameInput.focus();
+    nameInput.click();
+  }, 100);
 }
 
 function closeDialog() {
   document.getElementById('server-dialog').style.display = 'none';
   editingServerId = null;
+
+  // 恢复终端 textarea
+  if (terminal && terminal.textarea) {
+    terminal.textarea.disabled = false;
+  }
 }
 
 function saveServer() {
@@ -526,17 +542,35 @@ function openFavDialog(fav = null, index = -1) {
   document.getElementById('fav-command').value = fav ? fav.command : '';
   document.getElementById('fav-desc').value = fav ? (fav.desc || '') : '';
 
-  // 先移除终端焦点
-  if (terminal) terminal.blur();
-  document.activeElement.blur();
+  // 彻底移除终端焦点
+  if (terminal) {
+    terminal.blur();
+    const textarea = terminal.textarea;
+    if (textarea) {
+      textarea.blur();
+      textarea.disabled = true;
+    }
+  }
 
   document.getElementById('favorite-dialog').style.display = 'flex';
-  setTimeout(() => document.getElementById('fav-name').focus(), 50);
+
+  // 多次尝试聚焦
+  const nameInput = document.getElementById('fav-name');
+  nameInput.focus();
+  setTimeout(() => {
+    nameInput.focus();
+    nameInput.click();
+  }, 100);
 }
 
 function closeFavDialog() {
   document.getElementById('favorite-dialog').style.display = 'none';
   editingFavIndex = -1;
+
+  // 恢复终端 textarea
+  if (terminal && terminal.textarea) {
+    terminal.textarea.disabled = false;
+  }
 }
 
 function saveFavorite() {
