@@ -278,11 +278,15 @@ function openDialog(server = null) {
   document.getElementById('server-interface').value = server ? (server.interface || 'lanplus') : 'lanplus';
   document.getElementById('server-cipher').value = server ? (server.cipherSuite || 17) : 17;
 
+  // 先移除终端焦点
+  if (terminal) terminal.blur();
+  document.activeElement.blur();
+
   const dialog = document.getElementById('server-dialog');
   dialog.style.display = 'flex';
 
   // 自动聚焦第一个输入框
-  setTimeout(() => document.getElementById('server-name').focus(), 100);
+  setTimeout(() => document.getElementById('server-name').focus(), 50);
 }
 
 function closeDialog() {
@@ -521,8 +525,13 @@ function openFavDialog(fav = null, index = -1) {
   document.getElementById('fav-name').value = fav ? fav.name : '';
   document.getElementById('fav-command').value = fav ? fav.command : '';
   document.getElementById('fav-desc').value = fav ? (fav.desc || '') : '';
+
+  // 先移除终端焦点
+  if (terminal) terminal.blur();
+  document.activeElement.blur();
+
   document.getElementById('favorite-dialog').style.display = 'flex';
-  setTimeout(() => document.getElementById('fav-name').focus(), 100);
+  setTimeout(() => document.getElementById('fav-name').focus(), 50);
 }
 
 function closeFavDialog() {
