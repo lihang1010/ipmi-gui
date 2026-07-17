@@ -219,6 +219,7 @@ function bindEvents() {
     if (currentServer) openDialog(currentServer);
   });
   document.getElementById('btn-delete-server').addEventListener('click', deleteServer);
+  document.getElementById('btn-test-connection').addEventListener('click', testConnection);
   document.getElementById('btn-import-config').addEventListener('click', importConfig);
   document.getElementById('btn-export-config').addEventListener('click', exportConfig);
 
@@ -228,6 +229,14 @@ function bindEvents() {
   document.getElementById('btn-sol-logdir').addEventListener('click', selectLogDir);
   document.getElementById('btn-sol-clear').addEventListener('click', clearTerminal);
 
+  // 收藏夹按钮
+  document.getElementById('btn-add-favorite').addEventListener('click', () => openFavDialog());
+  document.getElementById('btn-exec-favorite').addEventListener('click', executeSelectedFavorite);
+  document.getElementById('btn-edit-favorite').addEventListener('click', editSelectedFavorite);
+  document.getElementById('btn-delete-favorite').addEventListener('click', deleteSelectedFavorite);
+  document.getElementById('btn-move-up').addEventListener('click', () => moveFavorite(-1));
+  document.getElementById('btn-move-down').addEventListener('click', () => moveFavorite(1));
+
   // 原始命令回车
   document.getElementById('raw-command').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') executeRawCommand();
@@ -235,6 +244,9 @@ function bindEvents() {
 
   // 显示当前日志目录
   updateLogDirDisplay();
+
+  // 加载收藏夹
+  loadFavorites();
 
   // 初始化终端
   initTerminal();
@@ -408,6 +420,216 @@ async function importConfig() {
   } catch (err) {
     alert(`导入失败: ${err.message}`);
   }
+}
+
+// ========== 连接测试 ==========
+
+async function testConnection() {
+  if (!currentServer) {
+    alert('请先选择服务器');
+    return;
+  }
+
+  const btn = document.getElementById('btn-test-connection');
+  btn.classList.add('loading');
+  showStatus('connecting', '正在测试连接...');
+
+  try {
+    // 使用 raw 6 1 命令测试连接 (Get Device ID)
+    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, 'raw 6 1');
+
+    if (result.code === 0 && result.stdout.trim()) {
+      showStatus('connected', `${currentServer.name} - 连接正常`);
+      alert(`连接测试成功!\n\n服务器: ${currentServer.name}\nIP: ${currentServer.host}\n\n响应: ${result.stdout.trim()}`);
+    } else {
+      showStatus('error', `${currentServer.name} - 连接失败`);
+      alert(`连接测试失败!\n\n服务器: ${currentServer.name}\nIP: ${currentServer.host}\n\n错误: ${result.stderr || '无响应'}`);
+    }
+  } catch (err) {
+    showStatus('error', '测试异常');
+    alert(`连接测试异常: ${err.message}`);
+  } finally {
+    btn.classList.remove('loading');
+  }
+}
+
+// ========== 收藏夹 ==========
+
+let favorites = [];
+let selectedFavIndex = -1;
+let editingFavIndex = -1;
+
+function loadFavorites() {
+  favorites = config.favorites || [];
+  renderFavorites();
+}
+
+function saveFavorites() {
+  config.favorites = favorites;
+  saveConfigToFile();
+}
+
+function renderFavorites() {
+  const list = document.getElementById('favorites-list');
+
+  if (favorites.length === 0) {
+    list.innerHTML = `
+      <div class="favorites-empty">
+        <div class="favorites-empty-icon">+</div>
+        <div>暂无收藏</div>
+        <div style="font-size:12px">点击"添加收藏"按钮添加常用命令</div>
+      </div>
+    `;
+    return;
+  }
+
+  list.innerHTML = favorites.map((fav, index) => `
+    <div class="favorite-item ${index === selectedFavIndex ? 'selected' : ''}"
+         onclick="selectFavorite(${index})" ondblclick="executeFavorite(${index})">
+      <div class="fav-icon">></div>
+      <div class="fav-info">
+        <div class="fav-name">${escapeHtml(fav.name)}</div>
+        <div class="fav-command">${escapeHtml(fav.command)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function selectFavorite(index) {
+  selectedFavIndex = index;
+  renderFavorites();
+  updateFavoriteButtons();
+
+  // 显示命令预览
+  const fav = favorites[index];
+  const preview = document.getElementById('favorites-preview');
+  preview.textContent = `命令: ${fav.command}\n${fav.desc ? '描述: ' + fav.desc : ''}`;
+}
+
+function updateFavoriteButtons() {
+  const hasSelection = selectedFavIndex >= 0;
+  document.getElementById('btn-exec-favorite').disabled = !hasSelection;
+  document.getElementById('btn-edit-favorite').disabled = !hasSelection;
+  document.getElementById('btn-delete-favorite').disabled = !hasSelection;
+  document.getElementById('btn-move-up').disabled = !hasSelection || selectedFavIndex === 0;
+  document.getElementById('btn-move-down').disabled = !hasSelection || selectedFavIndex === favorites.length - 1;
+}
+
+function openFavDialog(fav = null, index = -1) {
+  editingFavIndex = index;
+  document.getElementById('fav-dialog-title').textContent = fav ? '编辑收藏' : '添加收藏';
+  document.getElementById('fav-name').value = fav ? fav.name : '';
+  document.getElementById('fav-command').value = fav ? fav.command : '';
+  document.getElementById('fav-desc').value = fav ? (fav.desc || '') : '';
+  document.getElementById('favorite-dialog').style.display = 'flex';
+  setTimeout(() => document.getElementById('fav-name').focus(), 100);
+}
+
+function closeFavDialog() {
+  document.getElementById('favorite-dialog').style.display = 'none';
+  editingFavIndex = -1;
+}
+
+function saveFavorite() {
+  const name = document.getElementById('fav-name').value.trim();
+  const command = document.getElementById('fav-command').value.trim();
+  const desc = document.getElementById('fav-desc').value.trim();
+
+  if (!name || !command) {
+    alert('请填写名称和命令');
+    return;
+  }
+
+  const favData = { name, command, desc };
+
+  if (editingFavIndex >= 0) {
+    favorites[editingFavIndex] = favData;
+  } else {
+    favorites.push(favData);
+  }
+
+  saveFavorites();
+  renderFavorites();
+  closeFavDialog();
+}
+
+function editSelectedFavorite() {
+  if (selectedFavIndex >= 0) {
+    openFavDialog(favorites[selectedFavIndex], selectedFavIndex);
+  }
+}
+
+function deleteSelectedFavorite() {
+  if (selectedFavIndex < 0) return;
+
+  const fav = favorites[selectedFavIndex];
+  if (!confirm(`确定删除收藏 "${fav.name}" 吗?`)) return;
+
+  favorites.splice(selectedFavIndex, 1);
+  selectedFavIndex = -1;
+  saveFavorites();
+  renderFavorites();
+  updateFavoriteButtons();
+}
+
+function executeSelectedFavorite() {
+  if (selectedFavIndex >= 0) {
+    executeFavorite(selectedFavIndex);
+  }
+}
+
+async function executeFavorite(index) {
+  if (!currentServer) {
+    alert('请先选择服务器');
+    return;
+  }
+
+  const fav = favorites[index];
+  if (!fav) return;
+
+  showStatus('connecting', `执行: ${fav.name}...`);
+
+  try {
+    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, fav.command);
+    const output = result.code === 0 ? result.stdout : `错误:\n${result.stderr}`;
+
+    // 切换到原始命令面板显示结果
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelector('[data-tab="raw"]').classList.add('active');
+    document.getElementById('panel-raw').classList.add('active');
+
+    document.getElementById('raw-command').value = fav.command;
+    document.getElementById('output-raw').textContent = output || '(无输出)';
+
+    showStatus('connected', `${fav.name} 执行完成`);
+  } catch (err) {
+    showStatus('error', '执行失败');
+    alert(`执行失败: ${err.message}`);
+  }
+}
+
+function moveFavorite(direction) {
+  if (selectedFavIndex < 0) return;
+
+  const newIndex = selectedFavIndex + direction;
+  if (newIndex < 0 || newIndex >= favorites.length) return;
+
+  // 交换位置
+  const temp = favorites[selectedFavIndex];
+  favorites[selectedFavIndex] = favorites[newIndex];
+  favorites[newIndex] = temp;
+
+  selectedFavIndex = newIndex;
+  saveFavorites();
+  renderFavorites();
+  updateFavoriteButtons();
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
 }
 
 // ========== SOL 操作 ==========

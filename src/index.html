@@ -20,6 +20,7 @@
         <button id="btn-add-server" class="btn btn-sm" data-tooltip="添加新服务器">添加</button>
         <button id="btn-edit-server" class="btn btn-sm" data-tooltip="编辑当前服务器">编辑</button>
         <button id="btn-delete-server" class="btn btn-sm btn-danger" data-tooltip="删除当前服务器">删除</button>
+        <button id="btn-test-connection" class="btn btn-sm btn-success" data-tooltip="测试服务器连接">测试连接</button>
         <span class="separator"></span>
         <button id="btn-import-config" class="btn btn-sm" data-tooltip="导入服务器配置">导入</button>
         <button id="btn-export-config" class="btn btn-sm" data-tooltip="导出服务器配置">导出</button>
@@ -34,6 +35,7 @@
       <!-- Tabs -->
       <div class="tabs">
         <button class="tab active" data-tab="sol">SOL 终端</button>
+        <button class="tab" data-tab="favorites">收藏夹</button>
         <button class="tab" data-tab="power">电源</button>
         <button class="tab" data-tab="sensor">传感器</button>
         <button class="tab" data-tab="fru">FRU</button>
@@ -56,6 +58,51 @@
           <button id="btn-sol-clear" class="btn btn-ghost">清屏</button>
         </div>
         <div id="terminal" class="terminal-container"></div>
+      </div>
+
+      <!-- Favorites Panel -->
+      <div id="panel-favorites" class="panel">
+        <div class="panel-toolbar">
+          <button id="btn-add-favorite" class="btn btn-primary">添加收藏</button>
+          <button id="btn-exec-favorite" class="btn btn-success" disabled>执行选中</button>
+          <button id="btn-edit-favorite" class="btn" disabled>编辑</button>
+          <button id="btn-delete-favorite" class="btn btn-danger" disabled>删除</button>
+          <span class="separator"></span>
+          <button id="btn-move-up" class="btn btn-ghost" disabled>上移</button>
+          <button id="btn-move-down" class="btn btn-ghost" disabled>下移</button>
+        </div>
+        <div class="favorites-container">
+          <div id="favorites-list" class="favorites-list"></div>
+          <pre id="favorites-preview" class="output-area">选择收藏的命令查看详情</pre>
+        </div>
+      </div>
+
+      <!-- Favorites Dialog -->
+      <div id="favorite-dialog" class="dialog-overlay" style="display: none;">
+        <div class="dialog">
+          <div class="dialog-header">
+            <h3 id="fav-dialog-title">添加收藏</h3>
+            <button class="dialog-close" onclick="closeFavDialog()">&times;</button>
+          </div>
+          <div class="dialog-body">
+            <div class="form-group">
+              <label>名称</label>
+              <input type="text" id="fav-name" placeholder="例: 查询电源状态">
+            </div>
+            <div class="form-group">
+              <label>命令</label>
+              <input type="text" id="fav-command" placeholder="例: power status">
+            </div>
+            <div class="form-group">
+              <label>描述（可选）</label>
+              <input type="text" id="fav-desc" placeholder="例: 查询服务器当前电源状态">
+            </div>
+          </div>
+          <div class="dialog-footer">
+            <button class="btn" onclick="closeFavDialog()">取消</button>
+            <button class="btn btn-primary" onclick="saveFavorite()">确定</button>
+          </div>
+        </div>
       </div>
 
       <!-- Power Panel -->
