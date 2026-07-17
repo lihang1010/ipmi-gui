@@ -294,6 +294,51 @@ function bindEvents() {
   initTerminal();
 }
 
+// ========== 服务器模板 ==========
+
+const SERVER_TEMPLATES = {
+  openubmc: {
+    name: 'openUBMC',
+    username: 'Administrator',
+    password: 'ttytty`12',
+    interface: 'lanplus',
+    cipherSuite: 17
+  },
+  ami: {
+    name: 'AMI',
+    username: 'admin',
+    password: 'admin',
+    interface: 'lanplus',
+    cipherSuite: 17
+  },
+  openbmc: {
+    name: 'OpenBMC',
+    username: 'root',
+    password: '0penBmc',
+    interface: 'lanplus',
+    cipherSuite: 17
+  }
+};
+
+function applyTemplate() {
+  const templateId = document.getElementById('server-template').value;
+  if (!templateId) return;
+
+  const template = SERVER_TEMPLATES[templateId];
+  if (!template) return;
+
+  document.getElementById('server-username').value = template.username;
+  document.getElementById('server-password').value = template.password;
+  document.getElementById('server-interface').value = template.interface;
+  document.getElementById('server-cipher').value = template.cipherSuite;
+
+  // 如果名称为空，自动填充模板名称
+  const nameInput = document.getElementById('server-name');
+  if (!nameInput.value.trim()) {
+    nameInput.value = template.name;
+  }
+}
+
 // ========== 服务器管理 ==========
 
 function updateServerList() {
@@ -310,6 +355,7 @@ function updateServerList() {
 function openDialog(server = null) {
   editingServerId = server ? server.id : null;
   document.getElementById('dialog-title').textContent = server ? '编辑服务器' : '添加服务器';
+  document.getElementById('server-template').value = '';
   document.getElementById('server-name').value = server ? server.name : '';
   document.getElementById('server-host').value = server ? server.host : '';
   document.getElementById('server-port').value = server ? (server.port || 623) : 623;

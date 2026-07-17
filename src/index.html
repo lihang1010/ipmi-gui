@@ -192,6 +192,15 @@
       </div>
       <div class="dialog-body">
         <div class="form-group">
+          <label>快速填充模板</label>
+          <select id="server-template" onchange="applyTemplate()">
+            <option value="">-- 选择模板 --</option>
+            <option value="openubmc">openUBMC (Administrator / ttytty`12)</option>
+            <option value="ami">AMI (admin / admin)</option>
+            <option value="openbmc">OpenBMC (root / 0penBmc)</option>
+          </select>
+        </div>
+        <div class="form-group">
           <label>名称</label>
           <input type="text" id="server-name" placeholder="生产服务器-01">
         </div>
