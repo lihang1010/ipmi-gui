@@ -327,15 +327,27 @@ function closeDialog() {
   editingServerId = null;
 }
 
-function saveServer() {
+async function saveServer() {
   const name = document.getElementById('server-name').value.trim();
   const host = document.getElementById('server-host').value.trim();
-  if (!name || !host) { safeAlert('请填写名称和IP地址'); return; }
+  const port = parseInt(document.getElementById('server-port').value) || 623;
+
+  if (!name || !host) { await safeAlert('请填写名称和IP地址'); return; }
+
+  // 检查重复 IP（排除自身）
+  const duplicate = config.servers.find(s =>
+    s.host === host &&
+    s.port === port &&
+    s.id !== editingServerId
+  );
+  if (duplicate) {
+    await safeAlert('IP 地址重复!\n\n' + host + ':' + port + ' 已存在服务器 "' + duplicate.name + '"');
+    return;
+  }
 
   const serverData = {
     id: editingServerId || Date.now().toString(),
-    name, host,
-    port: parseInt(document.getElementById('server-port').value) || 623,
+    name, host, port,
     username: document.getElementById('server-username').value.trim(),
     password: document.getElementById('server-password').value,
     interface: document.getElementById('server-interface').value,
