@@ -3,13 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 
-// 禁用 GPU 和缓存相关警告
-app.commandLine.appendSwitch('disable-gpu');
-app.commandLine.appendSwitch('disable-gpu-compositing');
-app.commandLine.appendSwitch('disk-cache-size', '1');
-app.commandLine.appendSwitch('media-cache-size', '1');
-
-// 重定向 stderr 过滤缓存警告
+// 过滤 stderr 中的缓存警告日志
 const originalStderrWrite = process.stderr.write;
 process.stderr.write = function(chunk, ...args) {
   const str = chunk.toString();
