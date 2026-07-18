@@ -289,6 +289,9 @@ function bindEvents() {
 
   document.getElementById('raw-command').addEventListener('keypress', (e) => { if (e.key === 'Enter') executeRawCommand(); });
 
+  // IP 输入时自动更新服务器名称（如果有模板）
+  document.getElementById('server-host').addEventListener('input', updateServerNameFromTemplate);
+
   updateLogDirDisplay();
   loadFavorites();
   initTerminal();
@@ -333,13 +336,21 @@ function applyTemplate() {
   document.getElementById('server-cipher').value = template.cipherSuite;
 
   // 自动填充名称: 模板名-IP地址
+  updateServerNameFromTemplate();
+}
+
+function updateServerNameFromTemplate() {
+  const templateId = document.getElementById('server-template').value;
   const host = document.getElementById('server-host').value.trim();
   const nameInput = document.getElementById('server-name');
-  if (host) {
-    nameInput.value = template.name + '-' + host;
-  } else if (!nameInput.value.trim()) {
-    nameInput.value = template.name;
-  }
+
+  if (!templateId || !host) return;
+
+  const template = SERVER_TEMPLATES[templateId];
+  if (!template) return;
+
+  // 名称格式: 模板名-IP地址
+  nameInput.value = template.name + '-' + host;
 }
 
 // ========== 服务器管理 ==========
