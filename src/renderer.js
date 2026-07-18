@@ -175,9 +175,37 @@ function bindEvents() {
   document.getElementById('btn-move-up').addEventListener('click', () => favorites.move(-1));
   document.getElementById('btn-move-down').addEventListener('click', () => favorites.move(1));
 
-  // 原始命令
+  // 电源按钮
+  document.getElementById('btn-power-status').addEventListener('click', () => executePower('status', getCurrentServer()));
+  document.getElementById('btn-power-on').addEventListener('click', () => executePower('on', getCurrentServer()));
+  document.getElementById('btn-power-off').addEventListener('click', () => executePower('off', getCurrentServer()));
+  document.getElementById('btn-power-cycle').addEventListener('click', () => executePower('cycle', getCurrentServer()));
+
+  // 传感器按钮
+  document.getElementById('btn-sensor-refresh').addEventListener('click', () => executeSensor(getCurrentServer()));
+
+  // FRU 按钮
+  document.getElementById('btn-fru-refresh').addEventListener('click', () => executeCommand('fru list', 'output-fru', getCurrentServer()));
+
+  // SEL 按钮
+  document.getElementById('btn-sel-refresh').addEventListener('click', () => executeCommand('sel list', 'output-sel', getCurrentServer()));
+  document.getElementById('btn-sel-info').addEventListener('click', () => executeCommand('sel info', 'output-sel', getCurrentServer()));
+
+  // 用户按钮
+  document.getElementById('btn-user-refresh').addEventListener('click', () => executeCommand('user list', 'output-user', getCurrentServer()));
+
+  // 网络按钮
+  document.getElementById('btn-network-refresh').addEventListener('click', () => executeCommand('lan print', 'output-network', getCurrentServer()));
+
+  // 原始命令按钮
+  document.getElementById('btn-raw-execute').addEventListener('click', () => executeRawCommand(getCurrentServer()));
   document.getElementById('raw-command').addEventListener('keypress', (e) => {
     if (e.key === 'Enter') executeRawCommand(getCurrentServer());
+  });
+
+  // 清屏按钮（通用）
+  document.querySelectorAll('.btn-clear').forEach(btn => {
+    btn.addEventListener('click', () => clearOutput(btn.dataset.target));
   });
 
   // 日志目录
@@ -449,8 +477,3 @@ window.executeFavorite = (index) => favorites.execute(index, getCurrentServer())
 window.closeFavDialog = favorites.closeDialog;
 window.saveFavorite = favorites.save;
 window.updateServerList = updateServerList;
-window.executeCommand = (cmd, id) => executeCommand(cmd, id, getCurrentServer());
-window.executePower = (action) => executePower(action, getCurrentServer());
-window.executeSensor = () => executeSensor(getCurrentServer());
-window.executeRawCommand = () => executeRawCommand(getCurrentServer());
-window.clearOutput = clearOutput;
