@@ -247,19 +247,20 @@ async function fullScan(subnet, options = {}) {
  */
 async function verifyIPMITemplate(ip, timeout = 3000) {
   const templates = [
-    { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
     { name: 'AMI', username: 'admin', password: 'admin' },
+    { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
     { name: 'OpenBMC', username: 'root', password: '0penBmc' }
   ];
 
   for (const template of templates) {
     try {
       const result = await verifyIPMI(ip, template.username, template.password, timeout);
+      console.log(`[VERIFY] ${ip} - ${template.name}: success=${result.success}, output="${result.output}", error="${result.error}"`);
       if (result.success) {
         return template.name;
       }
     } catch (e) {
-      // 继续尝试下一个模板
+      console.log(`[VERIFY] ${ip} - ${template.name}: error - ${e.message}`);
     }
   }
   return null;
@@ -270,12 +271,16 @@ async function verifyIPMITemplate(ip, timeout = 3000) {
  */
 async function verifyIPMI(ip, username, password, timeout = 3000) {
   return new Promise((resolve) => {
-    // 尝试 lanplus 接口
     const ipmitoolPath = require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe');
+    
+    // 保存密码到临时文件，避免特殊字符问题
+    const tmpFile = require('path').join(require('os').tmpdir(), `ipmi_pwd_${Date.now()}.txt`);
+    require('fs').writeFileSync(tmpFile, password);
+    
     const args = [
       '-H', ip,
       '-U', username,
-      '-P', password,
+      '-f', tmpFile,
       '-I', 'lanplus',
       '-C', '17',
       '-N', '2',
@@ -287,12 +292,22 @@ async function verifyIPMI(ip, username, password, timeout = 3000) {
       `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`,
       { timeout, windowsHide: true },
       (err, stdout, stderr) => {
-        // 成功条件：没有错误，或者错误信息不包含 "unauthorized" / "authentication"
-        const success = !err || 
-          (stderr && !stderr.includes('unauthorized') && 
-           !stderr.includes('authentication') && 
-           !stderr.includes('Invalid password') &&
-           !stderr.includes('RAKP'));
+        // 清理临时文件
+        try { require('fs').unlinkSync(tmpFile); } catch (e) {}
+        
+        // 严格的成功条件：
+        // 1. 没有错误
+        // 2. stdout 包含十六进制数据（IPMI 响应格式）
+        const hasHexOutput = stdout && /^[0-9a-f\s]+$/i.test(stdout.trim());
+        const hasNoAuthError = !stderr || (
+          !stderr.includes('unauthorized') &&
+          !stderr.includes('authentication') &&
+          !stderr.includes('Invalid password') &&
+          !stderr.includes('RAKP') &&
+          !stderr.includes('SOL')
+        );
+        
+        const success = !err && hasHexOutput && hasNoAuthError;
         
         resolve({
           success,
@@ -302,7 +317,10 @@ async function verifyIPMI(ip, username, password, timeout = 3000) {
       }
     );
 
-    proc.on('error', () => resolve({ success: false, error: '执行失败' }));
+    proc.on('error', () => {
+      try { require('fs').unlinkSync(tmpFile); } catch (e) {}
+      resolve({ success: false, error: '执行失败' });
+    });
   });
 }
 
