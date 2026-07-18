@@ -566,7 +566,7 @@ function renderScanResults(results) {
         ${template ? `<span class="scan-status new">${template}</span>` : ''}
         <span class="scan-status ${exists ? 'exists' : ''}">${exists ? '已存在' : ''}</span>
         <div class="scan-actions">
-          ${exists ? '' : `<button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')">添加</button>`}
+          <button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')" ${exists ? 'disabled' : ''}>添加</button>
         </div>
       </div>
     `;
