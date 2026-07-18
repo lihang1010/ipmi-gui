@@ -59,31 +59,35 @@ function pingHost(ip, timeout = 200) {
 }
 
 /**
- * 扫描单个端口 (异步)
+ * 扫描单个端口 (UDP - IPMI 使用 RMCP/UDP 协议)
  */
-function scanPort(ip, port = 623, timeout = 200) {
+function scanPort(ip, port = 623, timeout = 300) {
   return new Promise((resolve) => {
-    const socket = new net.Socket();
+    const dgram = require('dgram');
+    const socket = dgram.createSocket('udp4');
+
     const timer = setTimeout(() => {
-      socket.destroy();
-      resolve(false);
+      socket.close();
+      // UDP 超时 - IPMI 可能不响应未知数据包
+      // 但设备可能在线，标记为潜在设备
+      resolve(true);
     }, timeout);
 
-    socket.connect(port, ip, () => {
+    socket.on('message', (msg, rinfo) => {
       clearTimeout(timer);
-      socket.destroy();
+      socket.close();
       resolve(true);
     });
 
     socket.on('error', () => {
       clearTimeout(timer);
+      socket.close();
       resolve(false);
     });
 
-    socket.on('timeout', () => {
-      socket.destroy();
-      resolve(false);
-    });
+    // 发送 RMCP 探测包
+    const rmcpPacket = Buffer.from([0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61, 0x00]);
+    socket.send(rmcpPacket, 0, rmcpPacket.length, port, ip);
   });
 }
 
