@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1784347697609" clover="3.2.0">
-  <project timestamp="1784347697609" name="All files">
+<coverage generated="1784347787352" clover="3.2.0">
+  <project timestamp="1784347787352" name="All files">
     <metrics statements="40" coveredstatements="11" conditionals="34" coveredconditionals="6" methods="8" coveredmethods="4" elements="82" coveredelements="21" complexity="0" loc="40" ncloc="40" packages="1" files="2" classes="2"/>
     <file name="templates.js" path="D:\tools\ipmitool\ipmi-gui-electron\src\modules\templates.js">
       <metrics statements="22" coveredstatements="3" conditionals="14" coveredconditionals="0" methods="2" coveredmethods="0"/>

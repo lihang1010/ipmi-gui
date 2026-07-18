@@ -27,6 +27,7 @@ let solRunning = false;
 
 document.addEventListener('DOMContentLoaded', () => {
   loadConfig();
+  updateServerList();
   favorites.loadFavorites();
   bindEvents();
   bindKeyboardShortcuts();
@@ -140,7 +141,8 @@ function bindEvents() {
 
   // 服务器选择
   document.getElementById('server-select').addEventListener('change', (e) => {
-    currentServer = getConfig().servers.find(s => s.id === e.target.value) || null;
+    const servers = getConfig().servers || [];
+    currentServer = servers.find(s => s.id === e.target.value) || null;
     showStatus(currentServer ? 'connected' : 'idle', currentServer ? currentServer.name : '未选择服务器');
   });
 
@@ -432,7 +434,7 @@ window.openDialog = openDialog;
 window.closeDialog = closeDialog;
 window.saveServer = saveServer;
 window.selectFavorite = favorites.select;
-window.executeFavorite = favorites.execute;
+window.executeFavorite = (index) => favorites.execute(index, currentServer);
 window.closeFavDialog = favorites.closeDialog;
 window.saveFavorite = favorites.save;
 window.updateServerList = updateServerList;
