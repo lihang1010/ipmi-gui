@@ -36,6 +36,7 @@
       <div class="tabs">
         <button class="tab active" data-tab="sol">SOL 终端</button>
         <button class="tab" data-tab="favorites">收藏夹</button>
+        <button class="tab" data-tab="scan">网络扫描</button>
         <button class="tab" data-tab="power">电源</button>
         <button class="tab" data-tab="sensor">传感器</button>
         <button class="tab" data-tab="fru">FRU</button>
@@ -102,6 +103,46 @@
             <button class="btn" onclick="closeFavDialog()">取消</button>
             <button class="btn btn-primary" onclick="saveFavorite()">确定</button>
           </div>
+        </div>
+      </div>
+
+      <!-- Network Scan Panel -->
+      <div id="panel-scan" class="panel">
+        <div class="panel-toolbar">
+          <label>网段:</label>
+          <input type="text" id="scan-subnet" class="input-command" placeholder="192.168.1.0" style="width:150px">
+          <label>/</label>
+          <input type="number" id="scan-cidr" class="input-command" value="24" min="16" max="30" style="width:60px">
+          <span class="separator"></span>
+          <label>超时:</label>
+          <input type="number" id="scan-timeout" class="input-command" value="200" min="50" max="1000" style="width:70px">
+          <label>ms</label>
+          <span class="separator"></span>
+          <button id="btn-scan-start" class="btn btn-primary">开始扫描</button>
+          <button id="btn-scan-stop" class="btn btn-danger" disabled>停止</button>
+        </div>
+        <!-- 进度条 -->
+        <div style="padding: 10px 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle);">
+          <div style="display:flex; align-items:center; gap:10px;">
+            <span id="scan-phase" style="font-size:12px; color:var(--text-muted);">就绪</span>
+            <div style="flex:1; height:6px; background:var(--bg-overlay); border-radius:3px; overflow:hidden;">
+              <div id="scan-progress-bar" style="width:0%; height:100%; background:var(--accent); transition:width 0.3s;"></div>
+            </div>
+            <span id="scan-progress-text" style="font-size:12px; color:var(--text-muted); min-width:120px;">0/0</span>
+            <span id="scan-found-count" style="font-size:12px; color:var(--success);">发现: 0台</span>
+          </div>
+        </div>
+        <!-- 扫描结果 -->
+        <div style="flex:1; overflow:auto; padding:8px 16px;">
+          <div id="scan-results" style="min-height:100px;">
+            <div style="text-align:center; color:var(--text-muted); padding:40px;">点击"开始扫描"发现网络中的 IPMI 设备</div>
+          </div>
+        </div>
+        <!-- 底部操作 -->
+        <div class="panel-toolbar">
+          <button id="btn-scan-select-all" class="btn btn-sm">全选</button>
+          <button id="btn-scan-add-selected" class="btn btn-sm btn-primary" disabled>批量添加</button>
+          <button id="btn-scan-export" class="btn btn-sm btn-ghost">导出结果</button>
         </div>
       </div>
 

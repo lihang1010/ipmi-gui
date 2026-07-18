@@ -14,6 +14,7 @@ const { showStatus, clearOutput, isValidIP } = require('./modules/utils');
 const { SERVER_TEMPLATES, applyTemplate, updateServerNameFromTemplate } = require('./modules/templates');
 const { executeCommand, executePower, executeSensor, executeRawCommand } = require('./modules/commandRunner');
 const favorites = require('./modules/favorites');
+const scanner = require('./modules/networkScanner');
 
 // ========== 全局状态 ==========
 let terminal = null;
@@ -36,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindEvents();
   bindKeyboardShortcuts();
   initTerminal();
+  initScan();
 
   // SOL IPC 监听
   ipcRenderer.on('sol:data', (event, data) => {
@@ -463,6 +465,204 @@ async function selectLogDir() {
     saveConfig();
     updateLogDirDisplay();
     showStatus('connected', '日志目录已更新');
+  }
+}
+
+// ========== 网络扫描 ==========
+
+let scanResults = [];
+
+function initScan() {
+  // 自动填充本机网段
+  const local = scanner.getLocalNetwork();
+  if (local) {
+    document.getElementById('scan-subnet').value = local.subnet;
+  }
+
+  // 绑定事件
+  document.getElementById('btn-scan-start').addEventListener('click', startScan);
+  document.getElementById('btn-scan-stop').addEventListener('click', stopScan);
+  document.getElementById('btn-scan-select-all').addEventListener('click', selectAllScanResults);
+  document.getElementById('btn-scan-add-selected').addEventListener('click', addSelectedScanResults);
+  document.getElementById('btn-scan-export').addEventListener('click', exportScanResults);
+}
+
+function startScan() {
+  const subnet = document.getElementById('scan-subnet').value.trim();
+  const cidr = parseInt(document.getElementById('scan-cidr').value) || 24;
+  const timeout = parseInt(document.getElementById('scan-timeout').value) || 200;
+
+  if (!subnet || !subnet.match(/^\d+\.\d+\.\d+$/)) {
+    safeAlert('请输入有效的网段，如 192.168.1.0');
+    return;
+  }
+
+  // 更新UI状态
+  document.getElementById('btn-scan-start').disabled = true;
+  document.getElementById('btn-scan-stop').disabled = false;
+  document.getElementById('scan-results').innerHTML = '';
+  scanResults = [];
+
+  // 开始扫描
+  const network = subnet.split('.').slice(0, 3).join('.');
+
+  scanner.fullScan(network, {
+    pingConcurrency: 50,
+    pingTimeout: timeout,
+    portConcurrency: 20,
+    portTimeout: timeout,
+    onProgress: (info) => updateScanProgress(info)
+  }).then(results => {
+    scanResults = results;
+    renderScanResults(results);
+    document.getElementById('btn-scan-start').disabled = false;
+    document.getElementById('btn-scan-stop').disabled = true;
+    document.getElementById('scan-phase').textContent = '扫描完成';
+    document.getElementById('scan-progress-bar').style.width = '100%';
+  });
+}
+
+function stopScan() {
+  scanner.stopScan();
+  document.getElementById('btn-scan-start').disabled = false;
+  document.getElementById('btn-scan-stop').disabled = true;
+  document.getElementById('scan-phase').textContent = '已停止';
+}
+
+function updateScanProgress(info) {
+  const { phase, current, total, found } = info;
+  const percent = Math.round((current / total) * 100);
+
+  document.getElementById('scan-phase').textContent = phase === 'ping' ? 'Ping 扫描中...' : '端口扫描中...';
+  document.getElementById('scan-progress-bar').style.width = percent + '%';
+  document.getElementById('scan-progress-text').textContent = `${current}/${total}`;
+  document.getElementById('scan-found-count').textContent = `发现: ${found.length}台`;
+
+  // 实时更新结果
+  renderScanResults(found);
+}
+
+function renderScanResults(results) {
+  const container = document.getElementById('scan-results');
+  const config = getConfig();
+  const existingIPs = (config.servers || []).map(s => s.host);
+
+  if (results.length === 0) {
+    container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:40px;">未发现设备</div>';
+    return;
+  }
+
+  container.innerHTML = results.map(item => {
+    const ip = typeof item === 'string' ? item : item.ip;
+    const latency = typeof item === 'object' ? item.latency : 0;
+    const exists = existingIPs.includes(ip);
+
+    return `
+      <div class="scan-result-item ${exists ? 'already-exists' : ''}">
+        <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
+        <span class="scan-ip">${ip}</span>
+        <span class="scan-latency">${latency}ms</span>
+        <span class="scan-status ${exists ? 'exists' : 'new'}">${exists ? '已存在' : '新设备'}</span>
+        <div class="scan-actions">
+          ${exists ? '' : `<button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}')">添加</button>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  updateScanButtons();
+}
+
+function updateScanButtons() {
+  const checkboxes = document.querySelectorAll('.scan-checkbox:checked');
+  document.getElementById('btn-scan-add-selected').disabled = checkboxes.length === 0;
+}
+
+function selectAllScanResults() {
+  document.querySelectorAll('.scan-checkbox:not(:disabled)').forEach(cb => cb.checked = true);
+  updateScanButtons();
+}
+
+async function addSingleScanResult(ip) {
+  const config = getConfig();
+  const name = ip;
+  const server = {
+    id: Date.now().toString(),
+    name,
+    host: ip,
+    port: 623,
+    username: 'Administrator',
+    password: 'ttytty`12',
+    interface: 'lanplus',
+    cipherSuite: 17,
+    privilegeLevel: 'ADMINISTRATOR'
+  };
+
+  config.servers.push(server);
+  saveConfig();
+  updateServerList();
+  await safeAlert(`已添加服务器: ${name} (${ip})`);
+  renderScanResults(scanResults);
+}
+
+async function addSelectedScanResults() {
+  const checkboxes = document.querySelectorAll('.scan-checkbox:checked');
+  if (checkboxes.length === 0) {
+    await safeAlert('请先选择要添加的设备');
+    return;
+  }
+
+  const config = getConfig();
+  let added = 0;
+
+  checkboxes.forEach(cb => {
+    const ip = cb.value;
+    if (!config.servers.some(s => s.host === ip)) {
+      config.servers.push({
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
+        name: ip,
+        host: ip,
+        port: 623,
+        username: 'Administrator',
+        password: 'ttytty`12',
+        interface: 'lanplus',
+        cipherSuite: 17,
+        privilegeLevel: 'ADMINISTRATOR'
+      });
+      added++;
+    }
+  });
+
+  saveConfig();
+  updateServerList();
+  await safeAlert(`已添加 ${added} 台服务器`);
+  renderScanResults(scanResults);
+}
+
+async function exportScanResults() {
+  if (scanResults.length === 0) {
+    await safeAlert('没有可导出的结果');
+    return;
+  }
+
+  const exportData = {
+    scanTime: new Date().toISOString(),
+    results: scanResults.map(item => ({
+      ip: typeof item === 'string' ? item : item.ip,
+      latency: typeof item === 'object' ? item.latency : 0
+    }))
+  };
+
+  const content = JSON.stringify(exportData, null, 2);
+  const defaultPath = require('path').join(
+    process.env.USERPROFILE || process.env.HOME,
+    'Desktop',
+    `ipmi_scan_${new Date().toISOString().slice(0, 10)}.json`
+  );
+
+  const result = await ipcRenderer.invoke('file:save', defaultPath, content);
+  if (result.success) {
+    showStatus('connected', '扫描结果已导出');
   }
 }
 

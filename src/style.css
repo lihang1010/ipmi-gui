@@ -401,6 +401,60 @@ body {
   margin: 0 var(--space-xs);
 }
 
+/* --- Scan Results --- */
+.scan-result-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-md);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: var(--space-xs);
+  transition: background var(--transition-fast);
+}
+
+.scan-result-item:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.scan-result-item.already-exists {
+  opacity: 0.6;
+}
+
+.scan-ip {
+  font-family: var(--font-mono);
+  font-weight: 500;
+  min-width: 140px;
+}
+
+.scan-latency {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 80px;
+}
+
+.scan-status {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.scan-status.new {
+  background: var(--success-subtle);
+  color: var(--success);
+}
+
+.scan-status.exists {
+  background: var(--warning-subtle);
+  color: var(--warning);
+}
+
+.scan-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--space-xs);
+}
+
 /* --- Terminal Container --- */
 .terminal-container {
   flex: 1;
