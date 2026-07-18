@@ -555,6 +555,7 @@ function renderScanResults(results) {
   container.innerHTML = results.map(item => {
     const ip = typeof item === 'string' ? item : item.ip;
     const latency = typeof item === 'object' ? item.latency : 0;
+    const template = typeof item === 'object' ? item.template : null;
     const exists = existingIPs.includes(ip);
 
     return `
@@ -562,9 +563,10 @@ function renderScanResults(results) {
         <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
         <span class="scan-ip">${ip}</span>
         <span class="scan-latency">${latency}ms</span>
-        <span class="scan-status ${exists ? 'exists' : 'new'}">${exists ? '已存在' : '新设备'}</span>
+        ${template ? `<span class="scan-status new">${template}</span>` : ''}
+        <span class="scan-status ${exists ? 'exists' : ''}">${exists ? '已存在' : ''}</span>
         <div class="scan-actions">
-          ${exists ? '' : `<button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}')">添加</button>`}
+          ${exists ? '' : `<button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')">添加</button>`}
         </div>
       </div>
     `;
@@ -583,16 +585,25 @@ function selectAllScanResults() {
   updateScanButtons();
 }
 
-async function addSingleScanResult(ip) {
+async function addSingleScanResult(ip, templateName) {
   const config = getConfig();
-  const name = ip;
+
+  // 模板默认值
+  const templates = {
+    'openUBMC': { username: 'Administrator', password: 'ttytty`12' },
+    'AMI': { username: 'admin', password: 'admin' },
+    'OpenBMC': { username: 'root', password: '0penBmc' }
+  };
+
+  const template = templates[templateName] || templates['openUBMC'];
+
   const server = {
     id: Date.now().toString(),
-    name,
+    name: ip,
     host: ip,
     port: 623,
-    username: 'Administrator',
-    password: 'ttytty`12',
+    username: template.username,
+    password: template.password,
     interface: 'lanplus',
     cipherSuite: 17,
     privilegeLevel: 'ADMINISTRATOR'
@@ -601,7 +612,7 @@ async function addSingleScanResult(ip) {
   config.servers.push(server);
   saveConfig();
   updateServerList();
-  await safeAlert(`已添加服务器: ${name} (${ip})`);
+  await safeAlert(`已添加服务器: ${ip}\n模板: ${templateName || '默认'}`);
   renderScanResults(scanResults);
 }
 
@@ -612,19 +623,30 @@ async function addSelectedScanResults() {
     return;
   }
 
+  const templates = {
+    'openUBMC': { username: 'Administrator', password: 'ttytty`12' },
+    'AMI': { username: 'admin', password: 'admin' },
+    'OpenBMC': { username: 'root', password: '0penBmc' }
+  };
+
   const config = getConfig();
   let added = 0;
 
   checkboxes.forEach(cb => {
     const ip = cb.value;
     if (!config.servers.some(s => s.host === ip)) {
+      // 从扫描结果中获取模板信息
+      const result = scanResults.find(r => r.ip === ip);
+      const templateName = result ? result.template : null;
+      const template = templates[templateName] || templates['openUBMC'];
+
       config.servers.push({
         id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
         name: ip,
         host: ip,
         port: 623,
-        username: 'Administrator',
-        password: 'ttytty`12',
+        username: template.username,
+        password: template.password,
         interface: 'lanplus',
         cipherSuite: 17,
         privilegeLevel: 'ADMINISTRATOR'

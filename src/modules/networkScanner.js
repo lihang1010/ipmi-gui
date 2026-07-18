@@ -208,23 +208,80 @@ async function fullScan(subnet, options = {}) {
   if (scanState.stopped) return scanState.results;
 
   // 第二步：端口扫描
+  let found = [];
   if (alive.length > 0) {
     scanState.phase = 'port';
     if (onProgress) onProgress({ phase: 'port', current: 0, total: alive.length, found: [] });
 
-    const found = await portScan(alive.map(a => a.ip), {
+    found = await portScan(alive.map(a => a.ip), {
       concurrency: portConcurrency,
       timeout: portTimeout,
-      onProgress: (current, total, found) => {
-        if (onProgress) onProgress({ phase: 'port', current, total, found });
+      onProgress: (current, total, f) => {
+        if (onProgress) onProgress({ phase: 'port', current, total, found: f });
       }
     });
-
-    scanState.results = found;
   }
+
+  // 第三步：IPMI 验证
+  if (found.length > 0) {
+    scanState.phase = 'verify';
+    if (onProgress) onProgress({ phase: 'verify', current: 0, total: found.length, found });
+
+    for (let i = 0; i < found.length; i++) {
+      if (scanState.stopped) break;
+      const device = found[i];
+      const template = await verifyIPMITemplate(device.ip);
+      device.template = template;
+      if (onProgress) onProgress({ phase: 'verify', current: i + 1, total: found.length, found });
+    }
+  }
+
+  scanState.results = found;
 
   scanState.running = false;
   return scanState.results;
+}
+
+/**
+ * 验证 IPMI 设备使用哪个模板
+ */
+async function verifyIPMITemplate(ip, timeout = 2000) {
+  const templates = [
+    { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
+    { name: 'AMI', username: 'admin', password: 'admin' },
+    { name: 'OpenBMC', username: 'root', password: '0penBmc' }
+  ];
+
+  for (const template of templates) {
+    try {
+      const result = await verifyIPMI(ip, template.username, template.password, timeout);
+      if (result.success) {
+        return template.name;
+      }
+    } catch (e) {
+      // 继续尝试下一个模板
+    }
+  }
+  return null;
+}
+
+/**
+ * 验证单个 IPMI 设备
+ */
+async function verifyIPMI(ip, username, password, timeout = 2000) {
+  return new Promise((resolve) => {
+    const cmd = `"${require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe')}" -H ${ip} -U ${username} -P "${password}" -I lanplus -C 17 -N 1 -R 0 raw 6 1`;
+
+    const proc = exec(cmd, { timeout, windowsHide: true }, (err, stdout, stderr) => {
+      resolve({
+        success: !err && stdout.trim().length > 0,
+        output: stdout.trim(),
+        error: stderr
+      });
+    });
+
+    proc.on('error', () => resolve({ success: false, error: '执行失败' }));
+  });
 }
 
 /**
