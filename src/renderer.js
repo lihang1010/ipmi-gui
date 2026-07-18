@@ -289,8 +289,8 @@ function bindEvents() {
 
   document.getElementById('raw-command').addEventListener('keypress', (e) => { if (e.key === 'Enter') executeRawCommand(); });
 
-  // IP 输入时自动更新服务器名称（如果有模板）
-  document.getElementById('server-host').addEventListener('input', updateServerNameFromTemplate);
+  // IP 输入框失焦时自动更新服务器名称
+  document.getElementById('server-host').addEventListener('blur', updateServerNameFromTemplate);
 
   updateLogDirDisplay();
   loadFavorites();
@@ -344,20 +344,27 @@ function updateServerNameFromTemplate() {
   const host = document.getElementById('server-host').value.trim();
   const nameInput = document.getElementById('server-name');
 
-  // 只有名称为空时自动填充
+  // 只有名称为空且 IP 有效时自动填充
   if (nameInput.value.trim()) return;
-  if (!host) return;
+  if (!host || !isValidIP(host)) return;
 
   if (templateId) {
-    // 有模板: 模板名-IP
     const template = SERVER_TEMPLATES[templateId];
     if (template) {
       nameInput.value = template.name + '-' + host;
     }
   } else {
-    // 无模板: 直接用IP
     nameInput.value = host;
   }
+}
+
+function isValidIP(ip) {
+  const parts = ip.split('.');
+  if (parts.length !== 4) return false;
+  return parts.every(p => {
+    const num = parseInt(p, 10);
+    return !isNaN(num) && num >= 0 && num <= 255 && p === String(num);
+  });
 }
 
 // ========== 服务器管理 ==========
@@ -398,9 +405,16 @@ async function saveServer() {
   let name = document.getElementById('server-name').value.trim();
   const host = document.getElementById('server-host').value.trim();
   const port = parseInt(document.getElementById('server-port').value) || 623;
+  const username = document.getElementById('server-username').value.trim();
+  const password = document.getElementById('server-password').value;
   const templateId = document.getElementById('server-template').value;
 
+  // 验证 IP
   if (!host) { await safeAlert('请填写 IP 地址'); return; }
+  if (!isValidIP(host)) { await safeAlert('IP 地址格式不正确\n\n示例: 192.168.1.100'); return; }
+
+  // 验证用户名密码
+  if (!username || !password) { await safeAlert('请填写用户名和密码'); return; }
 
   // 名称为空时自动填充
   if (!name) {
