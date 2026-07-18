@@ -533,10 +533,13 @@ function updateScanProgress(info) {
   const { phase, current, total, found } = info;
   const percent = Math.round((current / total) * 100);
 
-  document.getElementById('scan-phase').textContent = phase === 'ping' ? 'Ping 扫描中...' : '端口扫描中...';
+  const phaseText = phase === 'ping' ? 'Ping 扫描中...' : phase === 'port' ? '端口扫描中...' : 'IPMI 验证中...';
+  document.getElementById('scan-phase').textContent = phaseText;
   document.getElementById('scan-progress-bar').style.width = percent + '%';
   document.getElementById('scan-progress-text').textContent = `${current}/${total}`;
   document.getElementById('scan-found-count').textContent = `发现: ${found.length}台`;
+
+  console.log(`[PROGRESS] ${phase} ${current}/${total}, found: ${found.length}`, found.map(f => f.ip || f));
 
   // 实时更新结果
   renderScanResults(found);

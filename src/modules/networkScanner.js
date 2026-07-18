@@ -243,6 +243,9 @@ async function fullScan(subnet, options = {}) {
 
   scanState.results = found;
 
+  console.log(`[SCAN] 扫描完成: 共 ${found.length} 台设备`);
+  found.forEach(f => console.log(`  - ${f.ip}: template=${f.template || 'null'}`));
+
   scanState.running = false;
   return scanState.results;
 }
