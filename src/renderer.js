@@ -19,9 +19,13 @@ const favorites = require('./modules/favorites');
 let terminal = null;
 let fitAddon = null;
 let serializeAddon = null;
-let currentServer = null;
+let _currentServer = null;
 let editingServerId = null;
 let solRunning = false;
+
+// getter 函数，确保始终获取最新值
+function getCurrentServer() { return _currentServer; }
+function setCurrentServer(server) { _currentServer = server; }
 
 // ========== 初始化 ==========
 
@@ -106,12 +110,13 @@ function refreshCurrentPanel() {
   const t = document.querySelector('.tab.active');
   if (!t) return;
   const tab = t.dataset.tab;
-  if (tab === 'power') executePower('status', currentServer);
-  else if (tab === 'sensor') executeSensor(currentServer);
-  else if (tab === 'fru') executeCommand('fru list', 'output-fru', currentServer);
-  else if (tab === 'sel') executeCommand('sel list', 'output-sel', currentServer);
-  else if (tab === 'user') executeCommand('user list', 'output-user', currentServer);
-  else if (tab === 'network') executeCommand('lan print', 'output-network', currentServer);
+  const server = getCurrentServer();
+  if (tab === 'power') executePower('status', server);
+  else if (tab === 'sensor') executeSensor(server);
+  else if (tab === 'fru') executeCommand('fru list', 'output-fru', server);
+  else if (tab === 'sel') executeCommand('sel list', 'output-sel', server);
+  else if (tab === 'user') executeCommand('user list', 'output-user', server);
+  else if (tab === 'network') executeCommand('lan print', 'output-network', server);
 }
 
 function clearCurrentPanel() {
@@ -142,13 +147,14 @@ function bindEvents() {
   // 服务器选择
   document.getElementById('server-select').addEventListener('change', (e) => {
     const servers = getConfig().servers || [];
-    currentServer = servers.find(s => s.id === e.target.value) || null;
-    showStatus(currentServer ? 'connected' : 'idle', currentServer ? currentServer.name : '未选择服务器');
+    const server = servers.find(s => s.id === e.target.value) || null;
+    setCurrentServer(server);
+    showStatus(server ? 'connected' : 'idle', server ? server.name : '未选择服务器');
   });
 
   // 服务器管理按钮
   document.getElementById('btn-add-server').addEventListener('click', () => openDialog());
-  document.getElementById('btn-edit-server').addEventListener('click', () => { if (currentServer) openDialog(currentServer); });
+  document.getElementById('btn-edit-server').addEventListener('click', () => { const s = getCurrentServer(); if (s) openDialog(s); });
   document.getElementById('btn-delete-server').addEventListener('click', deleteServer);
   document.getElementById('btn-test-connection').addEventListener('click', testConnection);
   document.getElementById('btn-import-config').addEventListener('click', importConfig);
@@ -163,7 +169,7 @@ function bindEvents() {
 
   // 收藏夹按钮
   document.getElementById('btn-add-favorite').addEventListener('click', () => favorites.openDialog());
-  document.getElementById('btn-exec-favorite').addEventListener('click', () => favorites.executeSelected(currentServer));
+  document.getElementById('btn-exec-favorite').addEventListener('click', () => favorites.executeSelected(getCurrentServer()));
   document.getElementById('btn-edit-favorite').addEventListener('click', () => favorites.editSelected());
   document.getElementById('btn-delete-favorite').addEventListener('click', () => favorites.deleteSelected());
   document.getElementById('btn-move-up').addEventListener('click', () => favorites.move(-1));
@@ -171,7 +177,7 @@ function bindEvents() {
 
   // 原始命令
   document.getElementById('raw-command').addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') executeRawCommand(currentServer);
+    if (e.key === 'Enter') executeRawCommand(getCurrentServer());
   });
 
   // 日志目录
@@ -259,38 +265,40 @@ async function saveServer() {
   updateServerList();
   closeDialog();
   document.getElementById('server-select').value = serverData.id;
-  currentServer = serverData;
+  setCurrentServer(serverData);
   showStatus('connected', serverData.name);
 }
 
 async function deleteServer() {
-  if (!currentServer) { await safeAlert('请先选择服务器'); return; }
-  const ok = await safeConfirm('确定删除服务器 "' + currentServer.name + '" 吗?');
+  const server = getCurrentServer();
+  if (!server) { await safeAlert('请先选择服务器'); return; }
+  const ok = await safeConfirm('确定删除服务器 "' + server.name + '" 吗?');
   if (!ok) return;
 
   const config = getConfig();
-  config.servers = config.servers.filter(s => s.id !== currentServer.id);
+  config.servers = config.servers.filter(s => s.id !== server.id);
   saveConfig();
   updateServerList();
-  currentServer = null;
+  setCurrentServer(null);
   showStatus('idle', '未选择服务器');
 }
 
 // ========== 连接测试 ==========
 
 async function testConnection() {
-  if (!currentServer) { await safeAlert('请先选择服务器'); return; }
+  const server = getCurrentServer();
+  if (!server) { await safeAlert('请先选择服务器'); return; }
   const btn = document.getElementById('btn-test-connection');
   btn.classList.add('loading');
   showStatus('connecting', '正在测试连接...');
   try {
-    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, 'raw 6 1');
+    const result = await ipcRenderer.invoke('ipmi:execute', server, 'raw 6 1');
     if (result.code === 0 && result.stdout.trim()) {
-      showStatus('connected', currentServer.name + ' - 连接正常');
-      await safeAlert('连接测试成功!\n\n服务器: ' + currentServer.name + '\nIP: ' + currentServer.host + '\n\n响应: ' + result.stdout.trim());
+      showStatus('connected', server.name + ' - 连接正常');
+      await safeAlert('连接测试成功!\n\n服务器: ' + server.name + '\nIP: ' + server.host + '\n\n响应: ' + result.stdout.trim());
     } else {
-      showStatus('error', currentServer.name + ' - 连接失败');
-      await safeAlert('连接测试失败!\n\n服务器: ' + currentServer.name + '\nIP: ' + currentServer.host + '\n\n错误: ' + (result.stderr || '无响应'));
+      showStatus('error', server.name + ' - 连接失败');
+      await safeAlert('连接测试失败!\n\n服务器: ' + server.name + '\nIP: ' + server.host + '\n\n错误: ' + (result.stderr || '无响应'));
     }
   } catch (err) {
     showStatus('error', '测试异常');
@@ -343,16 +351,17 @@ async function importConfig() {
 // ========== SOL 操作 ==========
 
 async function startSol() {
-  if (!currentServer) { await safeAlert('请先选择服务器'); return; }
+  const server = getCurrentServer();
+  if (!server) { await safeAlert('请先选择服务器'); return; }
   initTerminal();
   const btn = document.getElementById('btn-sol-start');
   btn.classList.add('loading');
   showStatus('connecting', '正在连接...');
   try {
-    const result = await ipcRenderer.invoke('sol:start', currentServer);
+    const result = await ipcRenderer.invoke('sol:start', server);
     if (result.success) {
       solRunning = true;
-      showStatus('connected', currentServer.name);
+      showStatus('connected', server.name);
       document.getElementById('btn-sol-start').disabled = true;
       terminal.focus();
     } else {
@@ -365,11 +374,12 @@ async function startSol() {
 }
 
 async function stopSol() {
-  if (!currentServer) { await safeAlert('请先选择服务器'); return; }
+  const server = getCurrentServer();
+  if (!server) { await safeAlert('请先选择服务器'); return; }
   const btn = document.getElementById('btn-sol-stop');
   btn.classList.add('loading');
   try {
-    const result = await ipcRenderer.invoke('sol:stop', currentServer);
+    const result = await ipcRenderer.invoke('sol:stop', server);
     if (result.success) {
       solRunning = false;
       showStatus('idle', 'SOL 已停止');
@@ -389,7 +399,8 @@ async function saveSolLog() {
   const now = new Date();
   const utc8 = new Date(now.getTime() + (8 * 60 * 60 * 1000));
   const timestamp = utc8.toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
-  const serverName = currentServer ? currentServer.host : 'unknown';
+  const server = getCurrentServer();
+  const serverName = server ? server.host : 'unknown';
   const defaultPath = require('path').join(getLogDir(), 'sol_' + serverName + '_' + timestamp + '.log');
   const result = await ipcRenderer.invoke('file:save', defaultPath, content);
   if (result.success) {
@@ -434,12 +445,12 @@ window.openDialog = openDialog;
 window.closeDialog = closeDialog;
 window.saveServer = saveServer;
 window.selectFavorite = favorites.select;
-window.executeFavorite = (index) => favorites.execute(index, currentServer);
+window.executeFavorite = (index) => favorites.execute(index, getCurrentServer());
 window.closeFavDialog = favorites.closeDialog;
 window.saveFavorite = favorites.save;
 window.updateServerList = updateServerList;
-window.executeCommand = (cmd, id) => executeCommand(cmd, id, currentServer);
-window.executePower = (action) => executePower(action, currentServer);
-window.executeSensor = () => executeSensor(currentServer);
-window.executeRawCommand = () => executeRawCommand(currentServer);
+window.executeCommand = (cmd, id) => executeCommand(cmd, id, getCurrentServer());
+window.executePower = (action) => executePower(action, getCurrentServer());
+window.executeSensor = () => executeSensor(getCurrentServer());
+window.executeRawCommand = () => executeRawCommand(getCurrentServer());
 window.clearOutput = clearOutput;
