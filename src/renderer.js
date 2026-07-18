@@ -163,7 +163,7 @@ function bindEvents() {
 
   // 收藏夹按钮
   document.getElementById('btn-add-favorite').addEventListener('click', () => favorites.openDialog());
-  document.getElementById('btn-exec-favorite').addEventListener('click', () => favorites.executeSelected());
+  document.getElementById('btn-exec-favorite').addEventListener('click', () => favorites.executeSelected(currentServer));
   document.getElementById('btn-edit-favorite').addEventListener('click', () => favorites.editSelected());
   document.getElementById('btn-delete-favorite').addEventListener('click', () => favorites.deleteSelected());
   document.getElementById('btn-move-up').addEventListener('click', () => favorites.move(-1));

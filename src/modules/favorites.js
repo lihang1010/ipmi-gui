@@ -173,9 +173,9 @@ async function deleteSelected() {
 /**
  * 执行选中的收藏
  */
-function executeSelected() {
+function executeSelected(currentServer) {
   if (selectedIndex >= 0) {
-    execute(selectedIndex);
+    execute(selectedIndex, currentServer);
   }
 }
 
