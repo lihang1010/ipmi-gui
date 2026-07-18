@@ -1,6 +1,52 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<coverage generated="1784287728662" clover="3.2.0">
-  <project timestamp="1784287728662" name="All files">
-    <metrics statements="0" coveredstatements="0" conditionals="0" coveredconditionals="0" methods="0" coveredmethods="0" elements="0" coveredelements="0" complexity="0" loc="0" ncloc="0" packages="0" files="0" classes="0"/>
+<coverage generated="1784347697609" clover="3.2.0">
+  <project timestamp="1784347697609" name="All files">
+    <metrics statements="40" coveredstatements="11" conditionals="34" coveredconditionals="6" methods="8" coveredmethods="4" elements="82" coveredelements="21" complexity="0" loc="40" ncloc="40" packages="1" files="2" classes="2"/>
+    <file name="templates.js" path="D:\tools\ipmitool\ipmi-gui-electron\src\modules\templates.js">
+      <metrics statements="22" coveredstatements="3" conditionals="14" coveredconditionals="0" methods="2" coveredmethods="0"/>
+      <line num="5" count="1" type="stmt"/>
+      <line num="29" count="1" type="stmt"/>
+      <line num="35" count="0" type="stmt"/>
+      <line num="36" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="38" count="0" type="stmt"/>
+      <line num="39" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="41" count="0" type="stmt"/>
+      <line num="42" count="0" type="stmt"/>
+      <line num="43" count="0" type="stmt"/>
+      <line num="44" count="0" type="stmt"/>
+      <line num="46" count="0" type="stmt"/>
+      <line num="53" count="0" type="stmt"/>
+      <line num="54" count="0" type="stmt"/>
+      <line num="55" count="0" type="stmt"/>
+      <line num="57" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="58" count="0" type="cond" truecount="0" falsecount="4"/>
+      <line num="60" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="61" count="0" type="stmt"/>
+      <line num="62" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="63" count="0" type="stmt"/>
+      <line num="66" count="0" type="stmt"/>
+      <line num="70" count="1" type="stmt"/>
+    </file>
+    <file name="utils.js" path="D:\tools\ipmitool\ipmi-gui-electron\src\modules\utils.js">
+      <metrics statements="18" coveredstatements="8" conditionals="20" coveredconditionals="6" methods="6" coveredmethods="4"/>
+      <line num="9" count="5" type="stmt"/>
+      <line num="16" count="9" type="stmt"/>
+      <line num="23" count="0" type="stmt"/>
+      <line num="24" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="25" count="0" type="stmt"/>
+      <line num="26" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="27" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="28" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="35" count="0" type="stmt"/>
+      <line num="36" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="37" count="0" type="stmt"/>
+      <line num="46" count="0" type="cond" truecount="0" falsecount="2"/>
+      <line num="53" count="9" type="stmt"/>
+      <line num="54" count="9" type="cond" truecount="2" falsecount="0"/>
+      <line num="55" count="6" type="stmt"/>
+      <line num="56" count="15" type="stmt"/>
+      <line num="57" count="15" type="cond" truecount="4" falsecount="0"/>
+      <line num="61" count="2" type="stmt"/>
+    </file>
   </project>
 </coverage>

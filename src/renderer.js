@@ -1,164 +1,38 @@
-// 渲染进程脚本
+/**
+ * IPMI GUI - 主渲染进程
+ */
+
 const { ipcRenderer } = require('electron');
 const { Terminal } = require('xterm');
 const { FitAddon } = require('@xterm/addon-fit');
 const { SerializeAddon } = require('@xterm/addon-serialize');
-const path = require('path');
-const fs = require('fs');
 
-// 全局变量
+// 导入模块
+const { loadConfig, saveConfig, getConfig } = require('./modules/configStore');
+const { safeAlert, safeConfirm } = require('./modules/modal');
+const { showStatus, clearOutput, isValidIP } = require('./modules/utils');
+const { SERVER_TEMPLATES, applyTemplate, updateServerNameFromTemplate } = require('./modules/templates');
+const { executeCommand, executePower, executeSensor, executeRawCommand } = require('./modules/commandRunner');
+const favorites = require('./modules/favorites');
+
+// ========== 全局状态 ==========
 let terminal = null;
 let fitAddon = null;
 let serializeAddon = null;
-let config = { servers: [], settings: {} };
 let currentServer = null;
 let editingServerId = null;
 let solRunning = false;
 
-// 配置文件路径
-const configPath = path.join(
-  process.env.APPDATA || process.env.HOME,
-  'ipmi-gui',
-  'config.json'
-);
-
-// 加载配置
-function loadConfig() {
-  try {
-    const dir = path.dirname(configPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('加载配置失败:', e);
-  }
-  return { servers: [], settings: {} };
-}
-
-// 保存配置
-function saveConfigToFile() {
-  try {
-    const dir = path.dirname(configPath);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('保存配置失败:', e);
-  }
-}
-
-// ========== 自定义弹窗（替代 alert/confirm）==========
-
-function showModal({ title = '提示', message = '', type = 'alert', onConfirm = null }) {
-  return new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.className = 'dialog-overlay';
-    overlay.style.zIndex = '99999';
-
-    const isConfirm = type === 'confirm';
-
-    overlay.innerHTML = `
-      <div class="dialog" style="width:360px">
-        <div class="dialog-header">
-          <h3>${escapeHtml(title)}</h3>
-        </div>
-        <div class="dialog-body">
-          <p style="color:var(--text-secondary);line-height:1.6;white-space:pre-wrap">${escapeHtml(message)}</p>
-        </div>
-        <div class="dialog-footer">
-          ${isConfirm ? '<button class="btn" id="modal-cancel">取消</button>' : ''}
-          <button class="btn btn-primary" id="modal-ok">确定</button>
-        </div>
-      </div>
-    `;
-
-    document.body.appendChild(overlay);
-
-    const okBtn = overlay.querySelector('#modal-ok');
-    const cancelBtn = overlay.querySelector('#modal-cancel');
-
-    const close = (result) => {
-      overlay.remove();
-      resolve(result);
-    };
-
-    okBtn.addEventListener('click', () => close(true));
-    if (cancelBtn) cancelBtn.addEventListener('click', () => close(false));
-
-    // 点击遮罩关闭
-    overlay.addEventListener('click', (e) => {
-      if (e.target === overlay) close(isConfirm ? false : true);
-    });
-
-    // ESC 关闭
-    const onKeydown = (e) => {
-      if (e.key === 'Escape') {
-        document.removeEventListener('keydown', onKeydown);
-        close(isConfirm ? false : true);
-      }
-    };
-    document.addEventListener('keydown', onKeydown);
-
-    setTimeout(() => okBtn.focus(), 50);
-  });
-}
-
-async function safeAlert(msg) {
-  await showModal({ message: msg });
-}
-
-async function safeConfirm(msg) {
-  return await showModal({ message: msg, type: 'confirm' });
-}
-
-// ========== 工具函数 ==========
-
-function resetFocus() {
-  if (document.activeElement) {
-    document.activeElement.blur();
-  }
-  if (terminal) terminal.blur();
-  document.body.focus();
-}
-
-function escapeHtml(text) {
-  const div = document.createElement('div');
-  div.textContent = text;
-  return div.innerHTML;
-}
-
-function showStatus(state = 'idle', text = '') {
-  const badge = document.getElementById('status-text');
-  badge.className = 'status-badge';
-  if (state === 'connected') badge.classList.add('connected');
-  else if (state === 'error') badge.classList.add('error');
-  badge.textContent = text || '未连接';
-}
-
-function clearOutput(elementId) {
-  const el = document.getElementById(elementId);
-  if (el) {
-    const defaults = {
-      'output-power': '点击按钮执行命令...',
-      'output-sensor': '点击刷新获取传感器数据...',
-      'output-fru': '点击刷新获取 FRU 信息...',
-      'output-sel': '点击刷新获取事件日志...',
-      'output-user': '点击刷新获取用户列表...',
-      'output-network': '点击刷新获取网络配置...',
-      'output-raw': '输入命令并点击执行...'
-    };
-    el.textContent = defaults[elementId] || '';
-  }
-}
-
 // ========== 初始化 ==========
 
 document.addEventListener('DOMContentLoaded', () => {
-  config = loadConfig();
-  updateServerList();
+  loadConfig();
+  favorites.loadFavorites();
   bindEvents();
   bindKeyboardShortcuts();
+  initTerminal();
 
+  // SOL IPC 监听
   ipcRenderer.on('sol:data', (event, data) => {
     if (terminal) terminal.write(data);
   });
@@ -169,6 +43,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-sol-start').disabled = false;
   });
 });
+
+// ========== 终端 ==========
 
 function initTerminal() {
   if (terminal) return;
@@ -187,8 +63,7 @@ function initTerminal() {
     lineHeight: 1.3,
     cursorBlink: true,
     cursorStyle: 'bar',
-    scrollback: 10000,
-    allowProposedApi: true
+    scrollback: 10000
   });
 
   fitAddon = new FitAddon();
@@ -220,8 +95,8 @@ function bindKeyboardShortcuts() {
     if (e.key === 'Escape') {
       const fd = document.getElementById('favorite-dialog');
       const sd = document.getElementById('server-dialog');
-      if (fd.style.display === 'flex') closeFavDialog();
-      else if (sd.style.display === 'flex') closeDialog();
+      if (fd && fd.style.display === 'flex') favorites.closeDialog();
+      else if (sd && sd.style.display === 'flex') closeDialog();
     }
   });
 }
@@ -230,12 +105,12 @@ function refreshCurrentPanel() {
   const t = document.querySelector('.tab.active');
   if (!t) return;
   const tab = t.dataset.tab;
-  if (tab === 'power') executePower('status');
-  else if (tab === 'sensor') executeSensor();
-  else if (tab === 'fru') executeCommand('fru list', 'output-fru');
-  else if (tab === 'sel') executeCommand('sel list', 'output-sel');
-  else if (tab === 'user') executeCommand('user list', 'output-user');
-  else if (tab === 'network') executeCommand('lan print', 'output-network');
+  if (tab === 'power') executePower('status', currentServer);
+  else if (tab === 'sensor') executeSensor(currentServer);
+  else if (tab === 'fru') executeCommand('fru list', 'output-fru', currentServer);
+  else if (tab === 'sel') executeCommand('sel list', 'output-sel', currentServer);
+  else if (tab === 'user') executeCommand('user list', 'output-user', currentServer);
+  else if (tab === 'network') executeCommand('lan print', 'output-network', currentServer);
 }
 
 function clearCurrentPanel() {
@@ -249,6 +124,7 @@ function clearCurrentPanel() {
 // ========== 事件绑定 ==========
 
 function bindEvents() {
+  // 选项卡
   document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
       document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -262,11 +138,13 @@ function bindEvents() {
     });
   });
 
+  // 服务器选择
   document.getElementById('server-select').addEventListener('change', (e) => {
-    currentServer = config.servers.find(s => s.id === e.target.value) || null;
+    currentServer = getConfig().servers.find(s => s.id === e.target.value) || null;
     showStatus(currentServer ? 'connected' : 'idle', currentServer ? currentServer.name : '未选择服务器');
   });
 
+  // 服务器管理按钮
   document.getElementById('btn-add-server').addEventListener('click', () => openDialog());
   document.getElementById('btn-edit-server').addEventListener('click', () => { if (currentServer) openDialog(currentServer); });
   document.getElementById('btn-delete-server').addEventListener('click', deleteServer);
@@ -274,97 +152,28 @@ function bindEvents() {
   document.getElementById('btn-import-config').addEventListener('click', importConfig);
   document.getElementById('btn-export-config').addEventListener('click', exportConfig);
 
+  // SOL 按钮
   document.getElementById('btn-sol-start').addEventListener('click', startSol);
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
   document.getElementById('btn-sol-save').addEventListener('click', saveSolLog);
   document.getElementById('btn-sol-logdir').addEventListener('click', selectLogDir);
   document.getElementById('btn-sol-clear').addEventListener('click', () => { if (terminal) terminal.clear(); });
 
-  document.getElementById('btn-add-favorite').addEventListener('click', () => openFavDialog());
-  document.getElementById('btn-exec-favorite').addEventListener('click', executeSelectedFavorite);
-  document.getElementById('btn-edit-favorite').addEventListener('click', editSelectedFavorite);
-  document.getElementById('btn-delete-favorite').addEventListener('click', deleteSelectedFavorite);
-  document.getElementById('btn-move-up').addEventListener('click', () => moveFavorite(-1));
-  document.getElementById('btn-move-down').addEventListener('click', () => moveFavorite(1));
+  // 收藏夹按钮
+  document.getElementById('btn-add-favorite').addEventListener('click', () => favorites.openDialog());
+  document.getElementById('btn-exec-favorite').addEventListener('click', () => favorites.executeSelected());
+  document.getElementById('btn-edit-favorite').addEventListener('click', () => favorites.editSelected());
+  document.getElementById('btn-delete-favorite').addEventListener('click', () => favorites.deleteSelected());
+  document.getElementById('btn-move-up').addEventListener('click', () => favorites.move(-1));
+  document.getElementById('btn-move-down').addEventListener('click', () => favorites.move(1));
 
-  document.getElementById('raw-command').addEventListener('keypress', (e) => { if (e.key === 'Enter') executeRawCommand(); });
-
-  // IP 输入框失焦时自动更新服务器名称
-  document.getElementById('server-host').addEventListener('blur', updateServerNameFromTemplate);
-
-  updateLogDirDisplay();
-  loadFavorites();
-  initTerminal();
-}
-
-// ========== 服务器模板 ==========
-
-const SERVER_TEMPLATES = {
-  openubmc: {
-    name: 'openUBMC',
-    username: 'Administrator',
-    password: 'ttytty`12',
-    interface: 'lanplus',
-    cipherSuite: 17
-  },
-  ami: {
-    name: 'AMI',
-    username: 'admin',
-    password: 'admin',
-    interface: 'lanplus',
-    cipherSuite: 17
-  },
-  openbmc: {
-    name: 'OpenBMC',
-    username: 'root',
-    password: '0penBmc',
-    interface: 'lanplus',
-    cipherSuite: 17
-  }
-};
-
-function applyTemplate() {
-  const templateId = document.getElementById('server-template').value;
-  if (!templateId) return;
-
-  const template = SERVER_TEMPLATES[templateId];
-  if (!template) return;
-
-  document.getElementById('server-username').value = template.username;
-  document.getElementById('server-password').value = template.password;
-  document.getElementById('server-interface').value = template.interface;
-  document.getElementById('server-cipher').value = template.cipherSuite;
-
-  // 自动填充名称: 模板名-IP地址
-  updateServerNameFromTemplate();
-}
-
-function updateServerNameFromTemplate() {
-  const templateId = document.getElementById('server-template').value;
-  const host = document.getElementById('server-host').value.trim();
-  const nameInput = document.getElementById('server-name');
-
-  // 只有名称为空且 IP 有效时自动填充
-  if (nameInput.value.trim()) return;
-  if (!host || !isValidIP(host)) return;
-
-  if (templateId) {
-    const template = SERVER_TEMPLATES[templateId];
-    if (template) {
-      nameInput.value = template.name + '-' + host;
-    }
-  } else {
-    nameInput.value = host;
-  }
-}
-
-function isValidIP(ip) {
-  const parts = ip.split('.');
-  if (parts.length !== 4) return false;
-  return parts.every(p => {
-    const num = parseInt(p, 10);
-    return !isNaN(num) && num >= 0 && num <= 255 && p === String(num);
+  // 原始命令
+  document.getElementById('raw-command').addEventListener('keypress', (e) => {
+    if (e.key === 'Enter') executeRawCommand(currentServer);
   });
+
+  // 日志目录
+  updateLogDirDisplay();
 }
 
 // ========== 服务器管理 ==========
@@ -372,7 +181,8 @@ function isValidIP(ip) {
 function updateServerList() {
   const select = document.getElementById('server-select');
   select.innerHTML = '<option value="">-- 选择服务器 --</option>';
-  config.servers.forEach(server => {
+  const servers = getConfig().servers || [];
+  servers.forEach(server => {
     const opt = document.createElement('option');
     opt.value = server.id;
     opt.textContent = server.name + ' (' + server.host + ')';
@@ -409,14 +219,10 @@ async function saveServer() {
   const password = document.getElementById('server-password').value;
   const templateId = document.getElementById('server-template').value;
 
-  // 验证 IP
   if (!host) { await safeAlert('请填写 IP 地址'); return; }
   if (!isValidIP(host)) { await safeAlert('IP 地址格式不正确\n\n示例: 192.168.1.100'); return; }
-
-  // 验证用户名密码
   if (!username || !password) { await safeAlert('请填写用户名和密码'); return; }
 
-  // 名称为空时自动填充
   if (!name) {
     if (templateId && SERVER_TEMPLATES[templateId]) {
       name = SERVER_TEMPLATES[templateId].name + '-' + host;
@@ -425,12 +231,8 @@ async function saveServer() {
     }
   }
 
-  // 检查重复 IP（排除自身）
-  const duplicate = config.servers.find(s =>
-    s.host === host &&
-    s.port === port &&
-    s.id !== editingServerId
-  );
+  const config = getConfig();
+  const duplicate = config.servers.find(s => s.host === host && s.port === port && s.id !== editingServerId);
   if (duplicate) {
     await safeAlert('IP 地址重复!\n\n' + host + ':' + port + ' 已存在服务器 "' + duplicate.name + '"');
     return;
@@ -438,9 +240,7 @@ async function saveServer() {
 
   const serverData = {
     id: editingServerId || Date.now().toString(),
-    name, host, port,
-    username: document.getElementById('server-username').value.trim(),
-    password: document.getElementById('server-password').value,
+    name, host, port, username, password,
     interface: document.getElementById('server-interface').value,
     cipherSuite: parseInt(document.getElementById('server-cipher').value) || 17,
     privilegeLevel: 'ADMINISTRATOR'
@@ -453,7 +253,7 @@ async function saveServer() {
     config.servers.push(serverData);
   }
 
-  saveConfigToFile();
+  saveConfig();
   updateServerList();
   closeDialog();
   document.getElementById('server-select').value = serverData.id;
@@ -465,8 +265,10 @@ async function deleteServer() {
   if (!currentServer) { await safeAlert('请先选择服务器'); return; }
   const ok = await safeConfirm('确定删除服务器 "' + currentServer.name + '" 吗?');
   if (!ok) return;
+
+  const config = getConfig();
   config.servers = config.servers.filter(s => s.id !== currentServer.id);
-  saveConfigToFile();
+  saveConfig();
   updateServerList();
   currentServer = null;
   showStatus('idle', '未选择服务器');
@@ -499,10 +301,11 @@ async function testConnection() {
 // ========== 导入导出 ==========
 
 async function exportConfig() {
+  const config = getConfig();
   if (!config.servers || config.servers.length === 0) { await safeAlert('没有可导出的服务器配置'); return; }
   const exportData = { exportTime: new Date().toISOString(), version: '1.0', servers: config.servers };
   const content = JSON.stringify(exportData, null, 2);
-  const defaultPath = path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop', 'ipmi_servers_' + new Date().toISOString().slice(0, 10) + '.json');
+  const defaultPath = require('path').join(process.env.USERPROFILE || process.env.HOME, 'Desktop', 'ipmi_servers_' + new Date().toISOString().slice(0, 10) + '.json');
   const result = await ipcRenderer.invoke('file:save', defaultPath, content);
   if (result.success) showStatus('connected', '配置已导出');
 }
@@ -511,13 +314,14 @@ async function importConfig() {
   const filePath = await ipcRenderer.invoke('dialog:selectFile', [{ name: 'JSON 文件', extensions: ['json'] }, { name: '所有文件', extensions: ['*'] }]);
   if (!filePath) return;
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
+    const content = require('fs').readFileSync(filePath, 'utf-8');
     const importData = JSON.parse(content);
     if (!importData.servers || !Array.isArray(importData.servers)) { await safeAlert('无效的配置文件格式'); return; }
     const validServers = importData.servers.filter(s => s.name && s.host);
     if (validServers.length === 0) { await safeAlert('配置文件中没有有效的服务器'); return; }
     const ok = await safeConfirm('找到 ' + validServers.length + ' 个服务器配置。\n\n点击"确定"合并到现有配置\n点击"取消"放弃导入');
     if (!ok) return;
+    const config = getConfig();
     let imported = 0;
     for (const server of validServers) {
       if (!config.servers.some(s => s.host === server.host && s.name === server.name)) {
@@ -526,7 +330,7 @@ async function importConfig() {
         imported++;
       }
     }
-    saveConfigToFile();
+    saveConfig();
     updateServerList();
     showStatus('connected', '已导入 ' + imported + ' 个服务器');
   } catch (err) {
@@ -584,12 +388,13 @@ async function saveSolLog() {
   const utc8 = new Date(now.getTime() + (8 * 60 * 60 * 1000));
   const timestamp = utc8.toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
   const serverName = currentServer ? currentServer.host : 'unknown';
-  const defaultPath = path.join(getLogDir(), 'sol_' + serverName + '_' + timestamp + '.log');
+  const defaultPath = require('path').join(getLogDir(), 'sol_' + serverName + '_' + timestamp + '.log');
   const result = await ipcRenderer.invoke('file:save', defaultPath, content);
   if (result.success) {
+    const config = getConfig();
     config.settings = config.settings || {};
-    config.settings.lastSaveDir = path.dirname(result.path);
-    saveConfigToFile();
+    config.settings.lastSaveDir = require('path').dirname(result.path);
+    saveConfig();
     showStatus('connected', '日志已保存');
   }
 }
@@ -597,7 +402,7 @@ async function saveSolLog() {
 // ========== 日志目录 ==========
 
 function getLogDir() {
-  return config.settings?.lastSaveDir || path.join(process.env.USERPROFILE || process.env.HOME, 'Desktop');
+  return getConfig().settings?.lastSaveDir || require('path').join(process.env.USERPROFILE || process.env.HOME, 'Desktop');
 }
 
 function updateLogDirDisplay() {
@@ -611,160 +416,28 @@ function updateLogDirDisplay() {
 async function selectLogDir() {
   const selectedDir = await ipcRenderer.invoke('dialog:selectDirectory');
   if (selectedDir) {
+    const config = getConfig();
     config.settings = config.settings || {};
     config.settings.lastSaveDir = selectedDir;
-    saveConfigToFile();
+    saveConfig();
     updateLogDirDisplay();
     showStatus('connected', '日志目录已更新');
   }
 }
 
-// ========== 收藏夹 ==========
-
-let favorites = [];
-let selectedFavIndex = -1;
-let editingFavIndex = -1;
-
-function loadFavorites() {
-  favorites = config.favorites || [];
-  renderFavorites();
-}
-
-function saveFavorites() {
-  config.favorites = favorites;
-  saveConfigToFile();
-}
-
-function renderFavorites() {
-  const list = document.getElementById('favorites-list');
-  if (favorites.length === 0) {
-    list.innerHTML = '<div class="favorites-empty"><div class="favorites-empty-icon">+</div><div>暂无收藏</div><div style="font-size:12px">点击"添加收藏"按钮添加常用命令</div></div>';
-    return;
-  }
-  list.innerHTML = favorites.map((fav, i) =>
-    '<div class="favorite-item ' + (i === selectedFavIndex ? 'selected' : '') + '" onclick="selectFavorite(' + i + ')" ondblclick="executeFavorite(' + i + ')">' +
-    '<div class="fav-icon">></div><div class="fav-info"><div class="fav-name">' + escapeHtml(fav.name) + '</div><div class="fav-command">' + escapeHtml(fav.command) + '</div></div></div>'
-  ).join('');
-}
-
-function selectFavorite(index) {
-  selectedFavIndex = index;
-  renderFavorites();
-  updateFavoriteButtons();
-  const fav = favorites[index];
-  document.getElementById('favorites-preview').textContent = '命令: ' + fav.command + (fav.desc ? '\n描述: ' + fav.desc : '');
-}
-
-function updateFavoriteButtons() {
-  const has = selectedFavIndex >= 0;
-  document.getElementById('btn-exec-favorite').disabled = !has;
-  document.getElementById('btn-edit-favorite').disabled = !has;
-  document.getElementById('btn-delete-favorite').disabled = !has;
-  document.getElementById('btn-move-up').disabled = !has || selectedFavIndex === 0;
-  document.getElementById('btn-move-down').disabled = !has || selectedFavIndex === favorites.length - 1;
-}
-
-function openFavDialog(fav = null, index = -1) {
-  editingFavIndex = index;
-  document.getElementById('fav-dialog-title').textContent = fav ? '编辑收藏' : '添加收藏';
-  document.getElementById('fav-name').value = fav ? fav.name : '';
-  document.getElementById('fav-command').value = fav ? fav.command : '';
-  document.getElementById('fav-desc').value = fav ? (fav.desc || '') : '';
-  if (terminal) terminal.blur();
-  document.getElementById('favorite-dialog').style.display = 'flex';
-  setTimeout(() => document.getElementById('fav-name').focus(), 50);
-}
-
-function closeFavDialog() {
-  document.getElementById('favorite-dialog').style.display = 'none';
-  editingFavIndex = -1;
-}
-
-async function saveFavorite() {
-  const name = document.getElementById('fav-name').value.trim();
-  const command = document.getElementById('fav-command').value.trim();
-  const desc = document.getElementById('fav-desc').value.trim();
-  if (!name || !command) { await safeAlert('请填写名称和命令'); return; }
-  if (editingFavIndex >= 0) favorites[editingFavIndex] = { name, command, desc };
-  else favorites.push({ name, command, desc });
-  saveFavorites();
-  renderFavorites();
-  closeFavDialog();
-}
-
-function editSelectedFavorite() {
-  if (selectedFavIndex >= 0) openFavDialog(favorites[selectedFavIndex], selectedFavIndex);
-}
-
-async function deleteSelectedFavorite() {
-  if (selectedFavIndex < 0) return;
-  const fav = favorites[selectedFavIndex];
-  const ok = await safeConfirm('确定删除收藏 "' + fav.name + '" 吗?');
-  if (!ok) return;
-  favorites.splice(selectedFavIndex, 1);
-  selectedFavIndex = -1;
-  saveFavorites();
-  renderFavorites();
-  updateFavoriteButtons();
-}
-
-function executeSelectedFavorite() {
-  if (selectedFavIndex >= 0) executeFavorite(selectedFavIndex);
-}
-
-async function executeFavorite(index) {
-  if (!currentServer) { await safeAlert('请先选择服务器'); return; }
-  const fav = favorites[index];
-  if (!fav) return;
-  showStatus('connecting', '执行: ' + fav.name + '...');
-  try {
-    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, fav.command);
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-    document.querySelector('[data-tab="raw"]').classList.add('active');
-    document.getElementById('panel-raw').classList.add('active');
-    document.getElementById('raw-command').value = fav.command;
-    document.getElementById('output-raw').textContent = result.code === 0 ? (result.stdout || '(无输出)') : '错误:\n' + result.stderr;
-    showStatus('connected', fav.name + ' 执行完成');
-  } catch (err) {
-    showStatus('error', '执行失败');
-    await safeAlert('执行失败: ' + err.message);
-  }
-}
-
-function moveFavorite(dir) {
-  if (selectedFavIndex < 0) return;
-  const ni = selectedFavIndex + dir;
-  if (ni < 0 || ni >= favorites.length) return;
-  [favorites[selectedFavIndex], favorites[ni]] = [favorites[ni], favorites[selectedFavIndex]];
-  selectedFavIndex = ni;
-  saveFavorites();
-  renderFavorites();
-  updateFavoriteButtons();
-}
-
-// ========== 命令执行 ==========
-
-async function executeCommand(command, outputId) {
-  if (!currentServer) { await safeAlert('请先选择服务器'); return; }
-  const el = document.getElementById(outputId);
-  el.textContent = '执行中...';
-  el.style.opacity = '0.5';
-  try {
-    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, command);
-    el.textContent = result.code === 0 ? (result.stdout || '(无输出)') : '错误:\n' + result.stderr;
-    el.style.opacity = '1';
-  } catch (err) {
-    el.textContent = '执行异常: ' + err.message;
-    el.style.opacity = '1';
-  }
-}
-
-function executePower(action) { executeCommand('power ' + action, 'output-power'); }
-function executeSensor() { executeCommand('sdr list', 'output-sensor'); }
-
-async function executeRawCommand() {
-  const command = document.getElementById('raw-command').value.trim();
-  if (!command) { await safeAlert('请输入命令'); return; }
-  executeCommand(command, 'output-raw');
-}
+// ========== 导出给 HTML 使用 ==========
+window.applyTemplate = applyTemplate;
+window.updateServerNameFromTemplate = updateServerNameFromTemplate;
+window.openDialog = openDialog;
+window.closeDialog = closeDialog;
+window.saveServer = saveServer;
+window.selectFavorite = favorites.select;
+window.executeFavorite = favorites.execute;
+window.closeFavDialog = favorites.closeDialog;
+window.saveFavorite = favorites.save;
+window.updateServerList = updateServerList;
+window.executeCommand = (cmd, id) => executeCommand(cmd, id, currentServer);
+window.executePower = (action) => executePower(action, currentServer);
+window.executeSensor = () => executeSensor(currentServer);
+window.executeRawCommand = () => executeRawCommand(currentServer);
+window.clearOutput = clearOutput;
