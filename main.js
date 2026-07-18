@@ -55,7 +55,6 @@ function createWindow() {
     minHeight: 600,
     title: 'IPMI 管理工具',
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: true,
       contextIsolation: false
     }
