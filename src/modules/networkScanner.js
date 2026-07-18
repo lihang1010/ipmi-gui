@@ -1,19 +1,18 @@
 /**
- * 网络扫描模块 - 发现 IPMI 设备
+ * 网络扫描模块 - 发现 IPMI 设备 (异步版本)
  */
 
-const { execSync } = require('child_process');
+const { exec } = require('child_process');
 const net = require('net');
 const os = require('os');
 
-// 扫描状态
 let scanState = {
   running: false,
   stopped: false,
   results: [],
   current: 0,
   total: 0,
-  phase: '' // 'ping' | 'port' | 'verify'
+  phase: ''
 };
 
 /**
@@ -39,25 +38,28 @@ function getLocalNetwork() {
 }
 
 /**
- * Ping 单个主机
+ * Ping 单个主机 (异步)
  */
 function pingHost(ip, timeout = 200) {
-  try {
+  return new Promise((resolve) => {
     const flag = process.platform === 'win32' ? '-n' : '-c';
     const timeoutFlag = process.platform === 'win32' ? '-w' : '-W';
-    execSync(`ping ${flag} 1 ${timeoutFlag} ${Math.ceil(timeout / 1000)} ${ip}`, {
-      timeout: timeout + 200,
-      stdio: 'pipe',
-      windowsHide: true
-    });
-    return true;
-  } catch {
-    return false;
-  }
+    const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
+
+    const proc = exec(
+      `ping ${flag} 1 ${timeoutFlag} ${timeoutSec} ${ip}`,
+      { timeout: timeout + 500, windowsHide: true },
+      (error) => {
+        resolve(!error);
+      }
+    );
+
+    proc.on('error', () => resolve(false));
+  });
 }
 
 /**
- * 扫描单个端口
+ * 扫描单个端口 (异步)
  */
 function scanPort(ip, port = 623, timeout = 200) {
   return new Promise((resolve) => {
@@ -86,20 +88,29 @@ function scanPort(ip, port = 623, timeout = 200) {
 }
 
 /**
- * 并发执行器
+ * 限制并发的异步执行器
  */
-async function parallel(tasks, concurrency) {
+async function runWithLimit(tasks, limit, onItemDone) {
   const results = [];
   let index = 0;
 
   const worker = async () => {
     while (index < tasks.length && !scanState.stopped) {
       const i = index++;
-      results[i] = await tasks[i]();
+      try {
+        results[i] = await tasks[i]();
+      } catch (e) {
+        results[i] = null;
+      }
+      if (onItemDone) onItemDone(i, tasks.length, results);
     }
   };
 
-  await Promise.all(Array(Math.min(concurrency, tasks.length)).fill(null).map(() => worker()));
+  const workers = [];
+  for (let i = 0; i < Math.min(limit, tasks.length); i++) {
+    workers.push(worker());
+  }
+  await Promise.all(workers);
   return results;
 }
 
@@ -107,39 +118,40 @@ async function parallel(tasks, concurrency) {
  * Ping 扫描网段
  */
 async function pingScan(subnet, options = {}) {
-  const { concurrency = 50, timeout = 200, onProgress } = options;
+  const { concurrency = 30, timeout = 300, onProgress } = options;
   const alive = [];
   let current = 0;
   const total = 254;
 
   scanState = { running: true, stopped: false, results: [], current: 0, total, phase: 'ping' };
 
-  const tasks = Array.from({ length: total }, (_, i) => {
-    return async () => {
-      if (scanState.stopped) return null;
-      const ip = `${subnet}.${i + 1}`;
-      const isAlive = pingHost(ip, timeout);
-      current++;
-      scanState.current = current;
-      if (isAlive) {
-        alive.push(ip);
-        scanState.results = [...alive];
-      }
-      if (onProgress) onProgress(current, total, alive);
+  const tasks = [];
+  for (let i = 1; i <= total; i++) {
+    const ip = `${subnet}.${i}`;
+    tasks.push(async () => {
+      const isAlive = await pingHost(ip, timeout);
       return isAlive ? ip : null;
-    };
+    });
+  }
+
+  const results = await runWithLimit(tasks, concurrency, (i, total, results) => {
+    current = i + 1;
+    scanState.current = current;
+    const found = results.filter(Boolean).filter(r => r !== null);
+    scanState.results = found.map(ip => ({ ip, latency: 0 }));
+    if (onProgress) onProgress(current, total, found.map(ip => ({ ip, latency: 0 })));
   });
 
-  await parallel(tasks, concurrency);
+  const found = results.filter(Boolean).filter(r => r !== null).map(ip => ({ ip, latency: 0 }));
   scanState.running = false;
-  return alive;
+  return found;
 }
 
 /**
  * 端口扫描
  */
 async function portScan(ips, options = {}) {
-  const { concurrency = 20, timeout = 200, onProgress } = options;
+  const { concurrency = 10, timeout = 300, onProgress } = options;
   const found = [];
   let current = 0;
   const total = ips.length;
@@ -148,22 +160,24 @@ async function portScan(ips, options = {}) {
 
   const tasks = ips.map(ip => {
     return async () => {
-      if (scanState.stopped) return null;
+      const start = Date.now();
       const isOpen = await scanPort(ip, 623, timeout);
-      current++;
-      scanState.current = current;
-      if (isOpen) {
-        found.push({ ip, latency: 0 });
-        scanState.results = [...found];
-      }
-      if (onProgress) onProgress(current, total, found);
-      return isOpen ? ip : null;
+      const latency = Date.now() - start;
+      return isOpen ? { ip, latency } : null;
     };
   });
 
-  await parallel(tasks, concurrency);
+  const results = await runWithLimit(tasks, concurrency, (i, total, allResults) => {
+    current = i + 1;
+    scanState.current = current;
+    const foundItems = allResults.filter(Boolean);
+    scanState.results = foundItems;
+    if (onProgress) onProgress(current, total, foundItems);
+  });
+
+  const foundItems = results.filter(Boolean);
   scanState.running = false;
-  return found;
+  return foundItems;
 }
 
 /**
@@ -171,10 +185,10 @@ async function portScan(ips, options = {}) {
  */
 async function fullScan(subnet, options = {}) {
   const {
-    pingConcurrency = 50,
-    pingTimeout = 200,
-    portConcurrency = 20,
-    portTimeout = 200,
+    pingConcurrency = 30,
+    pingTimeout = 300,
+    portConcurrency = 10,
+    portTimeout = 300,
     onProgress
   } = options;
 
@@ -187,9 +201,6 @@ async function fullScan(subnet, options = {}) {
     concurrency: pingConcurrency,
     timeout: pingTimeout,
     onProgress: (current, total, found) => {
-      scanState.current = current;
-      scanState.total = total;
-      scanState.results = found.map(ip => ({ ip, latency: 0 }));
       if (onProgress) onProgress({ phase: 'ping', current, total, found });
     }
   });
@@ -201,13 +212,10 @@ async function fullScan(subnet, options = {}) {
     scanState.phase = 'port';
     if (onProgress) onProgress({ phase: 'port', current: 0, total: alive.length, found: [] });
 
-    const found = await portScan(alive, {
+    const found = await portScan(alive.map(a => a.ip), {
       concurrency: portConcurrency,
       timeout: portTimeout,
       onProgress: (current, total, found) => {
-        scanState.current = current;
-        scanState.total = total;
-        scanState.results = found;
         if (onProgress) onProgress({ phase: 'port', current, total, found });
       }
     });
@@ -217,28 +225,6 @@ async function fullScan(subnet, options = {}) {
 
   scanState.running = false;
   return scanState.results;
-}
-
-/**
- * 验证 IPMI 设备
- */
-async function verifyIPMI(ip, username, password, timeout = 2000) {
-  const ipmitoolPath = require('./configStore').getIpmiToolPath ? 
-    require('./configStore').getIpmiToolPath() : 'ipmitool.exe';
-
-  return new Promise((resolve) => {
-    const cmd = `"${ipmitoolPath}" -H ${ip} -U ${username} -P ${password} -I lanplus -C 17 -N 1 -R 0 raw 6 1`;
-
-    const proc = require('child_process').exec(cmd, { timeout, windowsHide: true }, (err, stdout, stderr) => {
-      resolve({
-        success: !err && stdout.trim().length > 0,
-        output: stdout.trim(),
-        error: stderr
-      });
-    });
-
-    proc.on('error', () => resolve({ success: false, error: '执行失败' }));
-  });
 }
 
 /**
@@ -262,7 +248,6 @@ module.exports = {
   pingScan,
   portScan,
   fullScan,
-  verifyIPMI,
   getScanState,
   stopScan
 };
