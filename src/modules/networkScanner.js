@@ -245,7 +245,7 @@ async function fullScan(subnet, options = {}) {
 /**
  * 验证 IPMI 设备使用哪个模板
  */
-async function verifyIPMITemplate(ip, timeout = 2000) {
+async function verifyIPMITemplate(ip, timeout = 3000) {
   const templates = [
     { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
     { name: 'AMI', username: 'admin', password: 'admin' },
@@ -268,17 +268,39 @@ async function verifyIPMITemplate(ip, timeout = 2000) {
 /**
  * 验证单个 IPMI 设备
  */
-async function verifyIPMI(ip, username, password, timeout = 2000) {
+async function verifyIPMI(ip, username, password, timeout = 3000) {
   return new Promise((resolve) => {
-    const cmd = `"${require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe')}" -H ${ip} -U ${username} -P "${password}" -I lanplus -C 17 -N 1 -R 0 raw 6 1`;
+    // 尝试 lanplus 接口
+    const ipmitoolPath = require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe');
+    const args = [
+      '-H', ip,
+      '-U', username,
+      '-P', password,
+      '-I', 'lanplus',
+      '-C', '17',
+      '-N', '2',
+      '-R', '1',
+      'raw', '6', '1'
+    ];
 
-    const proc = exec(cmd, { timeout, windowsHide: true }, (err, stdout, stderr) => {
-      resolve({
-        success: !err && stdout.trim().length > 0,
-        output: stdout.trim(),
-        error: stderr
-      });
-    });
+    const proc = exec(
+      `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`,
+      { timeout, windowsHide: true },
+      (err, stdout, stderr) => {
+        // 成功条件：没有错误，或者错误信息不包含 "unauthorized" / "authentication"
+        const success = !err || 
+          (stderr && !stderr.includes('unauthorized') && 
+           !stderr.includes('authentication') && 
+           !stderr.includes('Invalid password') &&
+           !stderr.includes('RAKP'));
+        
+        resolve({
+          success,
+          output: stdout ? stdout.trim() : '',
+          error: stderr ? stderr.trim() : ''
+        });
+      }
+    );
 
     proc.on('error', () => resolve({ success: false, error: '执行失败' }));
   });
