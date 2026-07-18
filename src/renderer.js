@@ -344,13 +344,20 @@ function updateServerNameFromTemplate() {
   const host = document.getElementById('server-host').value.trim();
   const nameInput = document.getElementById('server-name');
 
-  if (!templateId || !host) return;
+  // 只有名称为空时自动填充
+  if (nameInput.value.trim()) return;
+  if (!host) return;
 
-  const template = SERVER_TEMPLATES[templateId];
-  if (!template) return;
-
-  // 名称格式: 模板名-IP地址
-  nameInput.value = template.name + '-' + host;
+  if (templateId) {
+    // 有模板: 模板名-IP
+    const template = SERVER_TEMPLATES[templateId];
+    if (template) {
+      nameInput.value = template.name + '-' + host;
+    }
+  } else {
+    // 无模板: 直接用IP
+    nameInput.value = host;
+  }
 }
 
 // ========== 服务器管理 ==========
@@ -388,11 +395,21 @@ function closeDialog() {
 }
 
 async function saveServer() {
-  const name = document.getElementById('server-name').value.trim();
+  let name = document.getElementById('server-name').value.trim();
   const host = document.getElementById('server-host').value.trim();
   const port = parseInt(document.getElementById('server-port').value) || 623;
+  const templateId = document.getElementById('server-template').value;
 
-  if (!name || !host) { await safeAlert('请填写名称和IP地址'); return; }
+  if (!host) { await safeAlert('请填写 IP 地址'); return; }
+
+  // 名称为空时自动填充
+  if (!name) {
+    if (templateId && SERVER_TEMPLATES[templateId]) {
+      name = SERVER_TEMPLATES[templateId].name + '-' + host;
+    } else {
+      name = host;
+    }
+  }
 
   // 检查重复 IP（排除自身）
   const duplicate = config.servers.find(s =>
