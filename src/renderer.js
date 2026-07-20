@@ -214,10 +214,10 @@ function closeSolTab(tabId) {
 
 function updateSolButtons() {
   const tab = getActiveTab();
-  const isRunning = tab && tab.isRunning;
-
-  document.getElementById('btn-sol-start').disabled = isRunning;
-  document.getElementById('btn-sol-stop').disabled = !isRunning;
+  // 启动按钮始终可用（可以创建新标签）
+  document.getElementById('btn-sol-start').disabled = false;
+  // 停止按钮只在当前标签运行时可用
+  document.getElementById('btn-sol-stop').disabled = !tab || !tab.isRunning;
 }
 
 function updateSolTabStatus(tabId, status) {
