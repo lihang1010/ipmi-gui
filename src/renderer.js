@@ -484,6 +484,7 @@ function initScan() {
   document.getElementById('btn-scan-start').addEventListener('click', startScan);
   document.getElementById('btn-scan-stop').addEventListener('click', stopScan);
   document.getElementById('btn-scan-select-all').addEventListener('click', selectAllScanResults);
+  document.getElementById('btn-scan-deselect-all').addEventListener('click', deselectAllScanResults);
   document.getElementById('btn-scan-add-selected').addEventListener('click', addSelectedScanResults);
   document.getElementById('btn-scan-export').addEventListener('click', exportScanResults);
 }
@@ -620,14 +621,13 @@ function updateScanButtons() {
 
 function selectAllScanResults() {
   const checkboxes = document.querySelectorAll('.scan-checkbox:not(:disabled)');
-  console.log(`[SCAN] 全选: 找到 ${checkboxes.length} 个可选 checkbox`);
-  checkboxes.forEach(cb => {
-    cb.checked = true;
-    console.log(`[SCAN] 勾选: ${cb.value}`);
-  });
+  checkboxes.forEach(cb => { cb.checked = true; });
   updateScanButtons();
-  // 触发 change 事件
-  checkboxes.forEach(cb => cb.dispatchEvent(new Event('change')));
+}
+
+function deselectAllScanResults() {
+  document.querySelectorAll('.scan-checkbox').forEach(cb => { cb.checked = false; });
+  updateScanButtons();
 }
 
 async function addSingleScanResult(ip, templateName) {
