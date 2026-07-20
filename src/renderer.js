@@ -42,18 +42,19 @@ document.addEventListener('DOMContentLoaded', () => {
   initMemoryMonitor();
 
   // SOL IPC 监听
-  ipcRenderer.on('sol:data', (event, data) => {
-    const tab = getActiveTab();
+  ipcRenderer.on('sol:data', (event, { tabId, data }) => {
+    const tab = solTabs.find(t => t.id === tabId);
     if (tab && tab.terminal) tab.terminal.write(data);
   });
 
-  ipcRenderer.on('sol:exit', (event, code) => {
-    const tab = getActiveTab();
+  ipcRenderer.on('sol:exit', (event, { tabId, exitCode }) => {
+    const tab = solTabs.find(t => t.id === tabId);
     if (tab) {
       tab.isRunning = false;
+      tab.ptyPid = null;
       updateSolTabStatus(tab.id, 'stopped');
     }
-    showStatus('disconnected', `SOL 已退出 (代码: ${code})`);
+    showStatus('disconnected', `SOL 已退出 (代码: ${exitCode})`);
     updateSolButtons();
   });
 });
@@ -90,7 +91,7 @@ function createTerminal(container) {
   term.onData((data) => {
     const tab = getActiveTab();
     if (tab && tab.isRunning) {
-      ipcRenderer.send('sol:write', data);
+      ipcRenderer.send('sol:write', tab.id, data);
     }
   });
 
@@ -540,7 +541,7 @@ async function startSol() {
   showStatus('connecting', '正在连接...');
 
   try {
-    const result = await ipcRenderer.invoke('sol:start', server);
+    const result = await ipcRenderer.invoke('sol:start', server, tab.id);
     if (result.success) {
       tab.isRunning = true;
       tab.ptyPid = result.pid;

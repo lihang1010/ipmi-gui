@@ -14,7 +14,7 @@ process.stderr.write = function(chunk, ...args) {
 };
 
 let mainWindow;
-let ptyProcess = null;
+let ptyProcesses = {};  // 多标签支持：{ tabId: ptyProcess }
 let configPath = path.join(app.getPath('userData'), 'config.json');
 
 // 默认配置
@@ -154,19 +154,15 @@ ipcMain.handle('ipmi:execute', async (event, server, command, args = []) => {
   });
 });
 
-// ========== SOL 处理 ==========
+// ========== SOL 处理 (多标签支持) ==========
 
 // 启动 SOL
-ipcMain.handle('sol:start', async (event, server) => {
-  if (ptyProcess) {
-    return { success: false, error: 'SOL 已在运行中' };
-  }
-
+ipcMain.handle('sol:start', async (event, server, tabId) => {
   const ipmitoolPath = getIpmiToolPath();
   const args = [...buildArgs(server), 'sol', 'activate'];
 
   try {
-    ptyProcess = pty.spawn(ipmitoolPath, args, {
+    const proc = pty.spawn(ipmitoolPath, args, {
       name: 'xterm-256color',
       cols: 120,
       rows: 30,
@@ -174,31 +170,34 @@ ipcMain.handle('sol:start', async (event, server) => {
       env: process.env
     });
 
+    ptyProcesses[tabId] = proc;
+
     // 转发输出到渲染进程
-    ptyProcess.onData((data) => {
+    proc.onData((data) => {
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sol:data', data);
+        mainWindow.webContents.send('sol:data', { tabId, data });
       }
     });
 
     // 进程退出
-    ptyProcess.onExit(({ exitCode }) => {
-      ptyProcess = null;
+    proc.onExit(({ exitCode }) => {
+      delete ptyProcesses[tabId];
       if (mainWindow && !mainWindow.isDestroyed()) {
-        mainWindow.webContents.send('sol:exit', exitCode);
+        mainWindow.webContents.send('sol:exit', { tabId, exitCode });
       }
     });
 
-    return { success: true, pid: ptyProcess.pid };
+    return { success: true, pid: proc.pid };
   } catch (err) {
     return { success: false, error: err.message };
   }
 });
 
 // 发送数据到 SOL
-ipcMain.on('sol:write', (event, data) => {
-  if (ptyProcess) {
-    ptyProcess.write(data);
+ipcMain.on('sol:write', (event, tabId, data) => {
+  const proc = ptyProcesses[tabId];
+  if (proc) {
+    proc.write(data);
   }
 });
 
@@ -217,7 +216,6 @@ ipcMain.handle('sol:stop', async (event, server) => {
     proc.stderr.on('data', (data) => { stderr += data; });
 
     proc.on('close', (code) => {
-      ptyProcess = null;
       resolve({ success: code === 0, stderr });
     });
 
