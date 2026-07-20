@@ -269,14 +269,6 @@ async function fullScan(subnet, options = {}) {
  * 验证 IPMI 设备使用哪个模板
  */
 async function verifyIPMITemplate(ip, timeout = 1500) {
-  // 第一步：快速检测是否是 IPMI 设备（不认证，超时短）
-  const quickCheck = await quickIPMICheck(ip, 1000);
-  if (!quickCheck) {
-    console.log(`[VERIFY] ${ip} - 快速检测失败，跳过`);
-    return null;
-  }
-
-  // 第二步：尝试认证
   const templates = [
     { name: 'AMI', username: 'admin', password: 'admin' },
     { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
@@ -295,29 +287,6 @@ async function verifyIPMITemplate(ip, timeout = 1500) {
     }
   }
   return null;
-}
-
-/**
- * 快速 IPMI 检测（不认证，只看是否有响应）
- */
-async function quickIPMICheck(ip, timeout = 1000) {
-  return new Promise((resolve) => {
-    const ipmitoolPath = require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe');
-    const args = ['-H', ip, '-I', 'lanplus', '-N', '1', '-R', '0', 'raw', '6', '1'];
-
-    const proc = exec(
-      `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`,
-      { timeout, windowsHide: true },
-      (err, stdout, stderr) => {
-        // 只要有响应（不管成功失败），就认为是 IPMI 设备
-        const hasResponse = stdout && stdout.trim().length > 0;
-        const noTimeout = !err || !err.killed;
-        resolve(hasResponse && noTimeout);
-      }
-    );
-
-    proc.on('error', () => resolve(false));
-  });
 }
 
 /**
