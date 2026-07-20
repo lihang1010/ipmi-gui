@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#1a1a2e" stroke="#16213e" stroke-width="2"/>
+  
+  <!-- Server rack icon -->
+  <rect x="34" y="24" width="60" height="80" rx="4" fill="#0f3460" stroke="#1a1a2e" stroke-width="1"/>
+  
+  <!-- Server slot 1 -->
+  <rect x="40" y="30" width="48" height="16" rx="2" fill="#16213e" stroke="#1a1a2e" stroke-width="0.5"/>
+  <circle cx="48" cy="38" r="2" fill="#4caf50"/>
+  <rect x="54" y="36" width="24" height="4" rx="1" fill="#0f3460"/>
+  
+  <!-- Server slot 2 -->
+  <rect x="40" y="52" width="48" height="16" rx="2" fill="#16213e" stroke="#1a1a2e" stroke-width="0.5"/>
+  <circle cx="48" cy="60" r="2" fill="#4caf50"/>
+  <rect x="54" y="58" width="24" height="4" rx="1" fill="#0f3460"/>
+  
+  <!-- Server slot 3 -->
+  <rect x="40" y="74" width="48" height="16" rx="2" fill="#16213e" stroke="#1a1a2e" stroke-width="0.5"/>
+  <circle cx="48" cy="82" r="2" fill="#4caf50"/>
+  <rect x="54" y="80" width="24" height="4" rx="1" fill="#0f3460"/>
+  
+  <!-- Network connection lines -->
+  <line x1="64" y1="94" x2="64" y2="110" stroke="#4caf50" stroke-width="2" stroke-dasharray="2,2"/>
+  <circle cx="64" cy="114" r="4" fill="#4caf50"/>
+  
+  <!-- Status indicator -->
+  <circle cx="90" cy="30" r="5" fill="#4caf50">
+    <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite"/>
+  </circle>
+</svg>
