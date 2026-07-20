@@ -613,12 +613,21 @@ function renderScanResults(results) {
 
 function updateScanButtons() {
   const checkboxes = document.querySelectorAll('.scan-checkbox:checked');
-  document.getElementById('btn-scan-add-selected').disabled = checkboxes.length === 0;
+  const btn = document.getElementById('btn-scan-add-selected');
+  btn.disabled = checkboxes.length === 0;
+  console.log(`[SCAN] 按钮状态: ${checkboxes.length} 个已选中, 按钮${btn.disabled ? '禁用' : '启用'}`);
 }
 
 function selectAllScanResults() {
-  document.querySelectorAll('.scan-checkbox:not(:disabled)').forEach(cb => cb.checked = true);
+  const checkboxes = document.querySelectorAll('.scan-checkbox:not(:disabled)');
+  console.log(`[SCAN] 全选: 找到 ${checkboxes.length} 个可选 checkbox`);
+  checkboxes.forEach(cb => {
+    cb.checked = true;
+    console.log(`[SCAN] 勾选: ${cb.value}`);
+  });
   updateScanButtons();
+  // 触发 change 事件
+  checkboxes.forEach(cb => cb.dispatchEvent(new Event('change')));
 }
 
 async function addSingleScanResult(ip, templateName) {
