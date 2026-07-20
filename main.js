@@ -107,6 +107,17 @@ function getIpmiToolPath() {
 
 // ========== IPC 处理 ==========
 
+// 获取应用内存使用情况
+ipcMain.handle('app:getMemory', () => {
+  const mem = process.memoryUsage();
+  return {
+    rss: Math.round(mem.rss / 1024 / 1024),
+    heapUsed: Math.round(mem.heapUsed / 1024 / 1024),
+    heapTotal: Math.round(mem.heapTotal / 1024 / 1024),
+    external: Math.round(mem.external / 1024 / 1024)
+  };
+});
+
 // 获取配置
 ipcMain.handle('config:get', () => loadConfig());
 

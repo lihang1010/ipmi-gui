@@ -38,6 +38,7 @@ document.addEventListener('DOMContentLoaded', () => {
   bindKeyboardShortcuts();
   initTerminal();
   initScan();
+  initMemoryMonitor();
 
   // SOL IPC 监听
   ipcRenderer.on('sol:data', (event, data) => {
@@ -485,6 +486,38 @@ function initScan() {
   document.getElementById('btn-scan-select-all').addEventListener('click', selectAllScanResults);
   document.getElementById('btn-scan-add-selected').addEventListener('click', addSelectedScanResults);
   document.getElementById('btn-scan-export').addEventListener('click', exportScanResults);
+}
+
+// ========== 内存监控 ==========
+
+let memoryMonitorInterval = null;
+
+function initMemoryMonitor() {
+  updateMemoryInfo();
+  // 每 5 秒刷新一次
+  memoryMonitorInterval = setInterval(updateMemoryInfo, 5000);
+}
+
+async function updateMemoryInfo() {
+  try {
+    const mem = await ipcRenderer.invoke('app:getMemory');
+    const el = document.getElementById('memory-info');
+    if (!el) return;
+
+    el.textContent = `${mem.rss} MB`;
+
+    // 根据内存使用量设置警告级别
+    el.classList.remove('warning', 'critical');
+    if (mem.rss > 500) {
+      el.classList.add('critical');
+    } else if (mem.rss > 300) {
+      el.classList.add('warning');
+    }
+
+    el.title = `物理内存: ${mem.rss} MB\n堆内存: ${mem.heapUsed}/${mem.heapTotal} MB\n外部内存: ${mem.external} MB`;
+  } catch (e) {
+    // 静默失败
+  }
 }
 
 function startScan() {

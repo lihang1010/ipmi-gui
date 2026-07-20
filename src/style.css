@@ -199,6 +199,47 @@ body {
   background: var(--danger);
 }
 
+/* Memory display */
+.memory-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  background: var(--bg-overlay);
+  color: var(--text-muted);
+  transition: all var(--transition-normal);
+}
+
+.memory-badge::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.memory-badge.warning {
+  background: var(--warning-subtle);
+  color: var(--warning);
+}
+
+.memory-badge.warning::before {
+  background: var(--warning);
+}
+
+.memory-badge.critical {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.memory-badge.critical::before {
+  background: var(--danger);
+}
+
 /* Log directory display */
 .logdir-display {
   max-width: 250px;
