@@ -386,7 +386,8 @@ function openDialog(server = null) {
   document.getElementById('server-password').value = server ? server.password : '';
   document.getElementById('server-interface').value = server ? (server.interface || 'lanplus') : 'lanplus';
   document.getElementById('server-cipher').value = server ? (server.cipherSuite || 17) : 17;
-  if (terminal) terminal.blur();
+  const activeTab = getActiveTab();
+  if (activeTab && activeTab.terminal) activeTab.terminal.blur();
   document.getElementById('server-dialog').style.display = 'flex';
   setTimeout(() => document.getElementById('server-name').focus(), 50);
 }
