@@ -496,6 +496,112 @@ body {
   gap: var(--space-xs);
 }
 
+/* --- SOL Tabs --- */
+.sol-tabs {
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  padding: 0 var(--space-sm);
+  min-height: 36px;
+}
+
+.sol-tab-list {
+  display: flex;
+  flex: 1;
+  overflow-x: auto;
+  gap: 2px;
+  padding: 4px 0;
+}
+
+.sol-tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  white-space: nowrap;
+}
+
+.sol-tab:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-secondary);
+}
+
+.sol-tab.active {
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.sol-tab-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  transition: all var(--transition-fast);
+}
+
+.sol-tab-close:hover {
+  background: var(--danger-subtle);
+  color: var(--danger);
+}
+
+.sol-tab-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  border: 1px dashed var(--border-default);
+  color: var(--text-muted);
+  font-size: 16px;
+  cursor: pointer;
+  margin-left: var(--space-xs);
+  transition: all var(--transition-fast);
+}
+
+.sol-tab-add:hover {
+  background: var(--accent-subtle);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sol-terminals {
+  flex: 1;
+  position: relative;
+  background: var(--bg-terminal);
+  margin: 0 var(--space-md) var(--space-md);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+}
+
+.sol-terminal-pane {
+  position: absolute;
+  inset: 0;
+  display: none;
+}
+
+.sol-terminal-pane.active {
+  display: block;
+}
+
 /* --- Terminal Container --- */
 .terminal-container {
   flex: 1;

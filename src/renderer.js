@@ -17,16 +17,18 @@ const favorites = require('./modules/favorites');
 const scanner = require('./modules/networkScanner');
 
 // ========== 全局状态 ==========
-let terminal = null;
-let fitAddon = null;
-let serializeAddon = null;
 let _currentServer = null;
 let editingServerId = null;
-let solRunning = false;
 
-// getter 函数，确保始终获取最新值
+// SOL 多标签管理
+let solTabs = [];  // [{id, name, server, terminal, fitAddon, serializeAddon, ptyPid, isRunning, logFile}]
+let activeTabId = null;
+let tabCounter = 0;
+
+// getter 函数
 function getCurrentServer() { return _currentServer; }
 function setCurrentServer(server) { _currentServer = server; }
+function getActiveTab() { return solTabs.find(t => t.id === activeTabId) || null; }
 
 // ========== 初始化 ==========
 
@@ -36,28 +38,32 @@ document.addEventListener('DOMContentLoaded', () => {
   favorites.loadFavorites();
   bindEvents();
   bindKeyboardShortcuts();
-  initTerminal();
   initScan();
   initMemoryMonitor();
 
   // SOL IPC 监听
   ipcRenderer.on('sol:data', (event, data) => {
-    if (terminal) terminal.write(data);
+    const tab = getActiveTab();
+    if (tab && tab.terminal) tab.terminal.write(data);
   });
 
   ipcRenderer.on('sol:exit', (event, code) => {
-    solRunning = false;
+    const tab = getActiveTab();
+    if (tab) {
+      tab.isRunning = false;
+      updateSolTabStatus(tab.id, 'stopped');
+    }
     showStatus('disconnected', `SOL 已退出 (代码: ${code})`);
-    document.getElementById('btn-sol-start').disabled = false;
+    updateSolButtons();
   });
 });
 
 // ========== 终端 ==========
 
-function initTerminal() {
-  if (terminal) return;
+// ========== SOL 多标签管理 ==========
 
-  terminal = new Terminal({
+function createTerminal(container) {
+  const term = new Terminal({
     theme: {
       background: '#0d0d10',
       foreground: '#d4d4d8',
@@ -74,23 +80,155 @@ function initTerminal() {
     scrollback: 10000
   });
 
-  fitAddon = new FitAddon();
-  serializeAddon = new SerializeAddon();
-  terminal.loadAddon(fitAddon);
-  terminal.loadAddon(serializeAddon);
-  terminal.open(document.getElementById('terminal'));
-  fitAddon.fit();
+  const fit = new FitAddon();
+  const serialize = new SerializeAddon();
+  term.loadAddon(fit);
+  term.loadAddon(serialize);
+  term.open(container);
+  fit.fit();
 
-  document.getElementById('terminal').addEventListener('click', () => terminal.focus());
-
-  terminal.onData((data) => {
-    if (solRunning) ipcRenderer.send('sol:write', data);
+  term.onData((data) => {
+    const tab = getActiveTab();
+    if (tab && tab.isRunning) {
+      ipcRenderer.send('sol:write', data);
+    }
   });
 
-  window.addEventListener('resize', () => { if (fitAddon) fitAddon.fit(); });
+  term.writeln('\x1b[38;2;91;155;213m  IPMI SOL 终端\x1b[0m');
+  term.writeln('\x1b[38;2;107;107;117m  点击 [启动 SOL] 连接到服务器\x1b[0m');
 
-  terminal.writeln('\x1b[38;2;91;155;213m  IPMI SOL 终端\x1b[0m');
-  terminal.writeln('\x1b[38;2;107;107;117m  点击 [启动 SOL] 连接到服务器\x1b[0m');
+  return { terminal: term, fitAddon: fit, serializeAddon: serialize };
+}
+
+function addSolTab(server = null) {
+  tabCounter++;
+  const tabId = `sol-${tabCounter}`;
+  const tabName = server ? `SOL-${tabCounter}: ${server.host}` : `SOL-${tabCounter}`;
+
+  // 创建终端容器
+  const pane = document.createElement('div');
+  pane.className = 'sol-terminal-pane';
+  pane.id = `pane-${tabId}`;
+  document.getElementById('sol-terminals').appendChild(pane);
+
+  // 创建终端
+  const { terminal, fitAddon, serializeAddon } = createTerminal(pane);
+
+  // 创建标签数据
+  const tabData = {
+    id: tabId,
+    name: tabName,
+    server: server,
+    terminal: terminal,
+    fitAddon: fitAddon,
+    serializeAddon: serializeAddon,
+    ptyPid: null,
+    isRunning: false,
+    logFile: null
+  };
+
+  solTabs.push(tabData);
+  renderSolTabs();
+  switchSolTab(tabId);
+
+  return tabData;
+}
+
+function renderSolTabs() {
+  const list = document.getElementById('sol-tab-list');
+  list.innerHTML = solTabs.map(tab => `
+    <div class="sol-tab ${tab.id === activeTabId ? 'active' : ''}" data-tab-id="${tab.id}">
+      <span class="sol-tab-name">${tab.name}</span>
+      <button class="sol-tab-close" onclick="event.stopPropagation(); closeSolTab('${tab.id}')">&times;</button>
+    </div>
+  `).join('');
+
+  // 绑定点击事件
+  list.querySelectorAll('.sol-tab').forEach(el => {
+    el.addEventListener('click', () => switchSolTab(el.dataset.tabId));
+  });
+
+  // 更新按钮状态
+  updateSolButtons();
+}
+
+function switchSolTab(tabId) {
+  // 隐藏所有面板
+  document.querySelectorAll('.sol-terminal-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.sol-tab').forEach(t => t.classList.remove('active'));
+
+  // 显示选中的面板
+  const pane = document.getElementById(`pane-${tabId}`);
+  if (pane) {
+    pane.classList.add('active');
+    activeTabId = tabId;
+
+    // 更新标签样式
+    const tabEl = document.querySelector(`.sol-tab[data-tab-id="${tabId}"]`);
+    if (tabEl) tabEl.classList.add('active');
+
+    // 重新 fit 终端
+    const tab = getActiveTab();
+    if (tab && tab.fitAddon) {
+      setTimeout(() => tab.fitAddon.fit(), 50);
+      tab.terminal.focus();
+    }
+  }
+
+  updateSolButtons();
+}
+
+function closeSolTab(tabId) {
+  const tabIndex = solTabs.findIndex(t => t.id === tabId);
+  if (tabIndex === -1) return;
+
+  const tab = solTabs[tabIndex];
+
+  // 如果正在运行，先停止
+  if (tab.isRunning && tab.ptyPid) {
+    ipcRenderer.invoke('sol:stop', tab.server);
+  }
+
+  // 销毁终端
+  tab.terminal.dispose();
+
+  // 移除面板
+  const pane = document.getElementById(`pane-${tabId}`);
+  if (pane) pane.remove();
+
+  // 从数组中移除
+  solTabs.splice(tabIndex, 1);
+
+  // 如果关闭的是当前标签，切换到其他标签
+  if (activeTabId === tabId) {
+    if (solTabs.length > 0) {
+      const newIndex = Math.min(tabIndex, solTabs.length - 1);
+      switchSolTab(solTabs[newIndex].id);
+    } else {
+      activeTabId = null;
+    }
+  }
+
+  renderSolTabs();
+}
+
+function updateSolButtons() {
+  const tab = getActiveTab();
+  const isRunning = tab && tab.isRunning;
+
+  document.getElementById('btn-sol-start').disabled = isRunning;
+  document.getElementById('btn-sol-stop').disabled = !isRunning;
+}
+
+function updateSolTabStatus(tabId, status) {
+  const tab = solTabs.find(t => t.id === tabId);
+  if (!tab) return;
+
+  const tabEl = document.querySelector(`.sol-tab[data-tab-id="${tabId}"] .sol-tab-name`);
+  if (tabEl) {
+    const icon = status === 'running' ? '●' : status === 'stopped' ? '○' : '';
+    tabEl.textContent = tab.name + (icon ? ' ' + icon : '');
+  }
 }
 
 // ========== 键盘快捷键 ==========
@@ -126,8 +264,12 @@ function clearCurrentPanel() {
   const t = document.querySelector('.tab.active');
   if (!t) return;
   const tab = t.dataset.tab;
-  if (tab === 'sol') { if (terminal) terminal.clear(); }
-  else clearOutput('output-' + tab);
+  if (tab === 'sol') {
+    const activeTab = getActiveTab();
+    if (activeTab && activeTab.terminal) activeTab.terminal.clear();
+  } else {
+    clearOutput('output-' + tab);
+  }
 }
 
 // ========== 事件绑定 ==========
@@ -141,8 +283,10 @@ function bindEvents() {
       tab.classList.add('active');
       document.getElementById('panel-' + tab.dataset.tab).classList.add('active');
       if (tab.dataset.tab === 'sol') {
-        initTerminal();
-        setTimeout(() => { if (fitAddon) fitAddon.fit(); }, 100);
+        setTimeout(() => {
+          const activeTab = getActiveTab();
+          if (activeTab && activeTab.fitAddon) activeTab.fitAddon.fit();
+        }, 100);
       }
     });
   });
@@ -168,7 +312,11 @@ function bindEvents() {
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
   document.getElementById('btn-sol-save').addEventListener('click', saveSolLog);
   document.getElementById('btn-sol-logdir').addEventListener('click', selectLogDir);
-  document.getElementById('btn-sol-clear').addEventListener('click', () => { if (terminal) terminal.clear(); });
+  document.getElementById('btn-sol-clear').addEventListener('click', () => {
+    const activeTab = getActiveTab();
+    if (activeTab && activeTab.terminal) activeTab.terminal.clear();
+  });
+  document.getElementById('btn-sol-new-tab').addEventListener('click', () => addSolTab());
 
   // 收藏夹按钮
   document.getElementById('btn-add-favorite').addEventListener('click', () => favorites.openDialog());
@@ -384,17 +532,23 @@ async function importConfig() {
 async function startSol() {
   const server = getCurrentServer();
   if (!server) { await safeAlert('请先选择服务器'); return; }
-  initTerminal();
+
+  // 创建新标签
+  const tab = addSolTab(server);
+
   const btn = document.getElementById('btn-sol-start');
   btn.classList.add('loading');
   showStatus('connecting', '正在连接...');
+
   try {
     const result = await ipcRenderer.invoke('sol:start', server);
     if (result.success) {
-      solRunning = true;
+      tab.isRunning = true;
+      tab.ptyPid = result.pid;
       showStatus('connected', server.name);
-      document.getElementById('btn-sol-start').disabled = true;
-      terminal.focus();
+      updateSolTabStatus(tab.id, 'running');
+      updateSolButtons();
+      tab.terminal.focus();
     } else {
       showStatus('error', '连接失败');
       await safeAlert('启动 SOL 失败:\n' + result.error);
@@ -405,16 +559,20 @@ async function startSol() {
 }
 
 async function stopSol() {
-  const server = getCurrentServer();
-  if (!server) { await safeAlert('请先选择服务器'); return; }
+  const tab = getActiveTab();
+  if (!tab || !tab.server) { await safeAlert('请先选择服务器'); return; }
+
   const btn = document.getElementById('btn-sol-stop');
   btn.classList.add('loading');
+
   try {
-    const result = await ipcRenderer.invoke('sol:stop', server);
+    const result = await ipcRenderer.invoke('sol:stop', tab.server);
     if (result.success) {
-      solRunning = false;
+      tab.isRunning = false;
+      tab.ptyPid = null;
       showStatus('idle', 'SOL 已停止');
-      document.getElementById('btn-sol-start').disabled = false;
+      updateSolTabStatus(tab.id, 'stopped');
+      updateSolButtons();
     } else {
       showStatus('error', '停止失败');
       await safeAlert('停止 SOL 失败:\n' + (result.stderr || result.error || '未知错误'));
@@ -425,14 +583,16 @@ async function stopSol() {
 }
 
 async function saveSolLog() {
-  if (!serializeAddon) { await safeAlert('终端未初始化'); return; }
-  const content = serializeAddon.serialize();
+  const tab = getActiveTab();
+  if (!tab || !tab.serializeAddon) { await safeAlert('终端未初始化'); return; }
+
+  const content = tab.serializeAddon.serialize();
   const now = new Date();
   const utc8 = new Date(now.getTime() + (8 * 60 * 60 * 1000));
   const timestamp = utc8.toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
-  const server = getCurrentServer();
-  const serverName = server ? server.host : 'unknown';
+  const serverName = tab.server ? tab.server.host : 'unknown';
   const defaultPath = require('path').join(getLogDir(), 'sol_' + serverName + '_' + timestamp + '.log');
+
   const result = await ipcRenderer.invoke('file:save', defaultPath, content);
   if (result.success) {
     const config = getConfig();
