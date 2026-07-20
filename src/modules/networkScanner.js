@@ -268,7 +268,15 @@ async function fullScan(subnet, options = {}) {
 /**
  * 验证 IPMI 设备使用哪个模板
  */
-async function verifyIPMITemplate(ip, timeout = 3000) {
+async function verifyIPMITemplate(ip, timeout = 1500) {
+  // 第一步：快速检测是否是 IPMI 设备（不认证，超时短）
+  const quickCheck = await quickIPMICheck(ip, 1000);
+  if (!quickCheck) {
+    console.log(`[VERIFY] ${ip} - 快速检测失败，跳过`);
+    return null;
+  }
+
+  // 第二步：尝试认证
   const templates = [
     { name: 'AMI', username: 'admin', password: 'admin' },
     { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
@@ -290,24 +298,47 @@ async function verifyIPMITemplate(ip, timeout = 3000) {
 }
 
 /**
- * 验证单个 IPMI 设备
+ * 快速 IPMI 检测（不认证，只看是否有响应）
  */
-async function verifyIPMI(ip, username, password, timeout = 3000) {
+async function quickIPMICheck(ip, timeout = 1000) {
   return new Promise((resolve) => {
     const ipmitoolPath = require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe');
-    
+    const args = ['-H', ip, '-I', 'lanplus', '-N', '1', '-R', '0', 'raw', '6', '1'];
+
+    const proc = exec(
+      `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`,
+      { timeout, windowsHide: true },
+      (err, stdout, stderr) => {
+        // 只要有响应（不管成功失败），就认为是 IPMI 设备
+        const hasResponse = stdout && stdout.trim().length > 0;
+        const noTimeout = !err || !err.killed;
+        resolve(hasResponse && noTimeout);
+      }
+    );
+
+    proc.on('error', () => resolve(false));
+  });
+}
+
+/**
+ * 验证单个 IPMI 设备
+ */
+async function verifyIPMI(ip, username, password, timeout = 1500) {
+  return new Promise((resolve) => {
+    const ipmitoolPath = require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe');
+
     // 保存密码到临时文件，避免特殊字符问题
     const tmpFile = require('path').join(require('os').tmpdir(), `ipmi_pwd_${Date.now()}.txt`);
     require('fs').writeFileSync(tmpFile, password);
-    
+
     const args = [
       '-H', ip,
       '-U', username,
       '-f', tmpFile,
       '-I', 'lanplus',
       '-C', '17',
-      '-N', '2',
-      '-R', '1',
+      '-N', '1',
+      '-R', '0',
       'raw', '6', '1'
     ];
 
@@ -317,7 +348,7 @@ async function verifyIPMI(ip, username, password, timeout = 3000) {
       (err, stdout, stderr) => {
         // 清理临时文件
         try { require('fs').unlinkSync(tmpFile); } catch (e) {}
-        
+
         // 严格的成功条件：
         // 1. 没有错误
         // 2. stdout 包含十六进制数据（IPMI 响应格式）
