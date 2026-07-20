@@ -562,6 +562,9 @@ async function stopSol() {
   const tab = getActiveTab();
   if (!tab || !tab.server) { await safeAlert('请先选择服务器'); return; }
 
+  const ok = await safeConfirm(`确定停止 SOL 吗？\n\n服务器: ${tab.server.name}\nIP: ${tab.server.host}`);
+  if (!ok) return;
+
   const btn = document.getElementById('btn-sol-stop');
   btn.classList.add('loading');
 
