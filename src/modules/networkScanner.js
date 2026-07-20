@@ -230,19 +230,30 @@ async function fullScan(subnet, options = {}) {
     console.log(`[SCAN] 端口扫描完成: ${found.length} 台设备有 IPMI 端口`);
   }
 
-  // 第三步：IPMI 验证
+  // 第三步：IPMI 验证（只保留验证成功的 BMC 设备）
   if (found.length > 0) {
     scanState.phase = 'verify';
     console.log(`[SCAN] 开始验证 ${found.length} 台设备:`, found.map(f => f.ip));
     if (onProgress) onProgress({ phase: 'verify', current: 0, total: found.length, found });
 
+    const verified = [];
     for (let i = 0; i < found.length; i++) {
       if (scanState.stopped) break;
       const device = found[i];
       const template = await verifyIPMITemplate(device.ip);
       device.template = template;
-      if (onProgress) onProgress({ phase: 'verify', current: i + 1, total: found.length, found });
+      
+      // 只保留验证成功的设备（有模板 = 是 BMC）
+      if (template) {
+        verified.push(device);
+      } else {
+        console.log(`[VERIFY] ${device.ip} - 未识别为 BMC 设备，已过滤`);
+      }
+      
+      if (onProgress) onProgress({ phase: 'verify', current: i + 1, total: found.length, found: verified });
     }
+    found.length = 0;
+    found.push(...verified);
   }
 
   scanState.results = found;

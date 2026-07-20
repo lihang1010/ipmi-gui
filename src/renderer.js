@@ -561,21 +561,13 @@ function renderScanResults(results) {
     const template = typeof item === 'object' ? item.template : null;
     const exists = existingIPs.includes(ip);
 
-    let statusHtml = '';
-    if (exists) {
-      statusHtml = '<span class="scan-status exists">已存在</span>';
-    } else if (template) {
-      statusHtml = `<span class="scan-status new">${template}</span>`;
-    } else {
-      statusHtml = '<span class="scan-status" style="background:var(--bg-overlay);color:var(--text-muted)">未识别</span>';
-    }
-
     return `
       <div class="scan-result-item ${exists ? 'already-exists' : ''}">
         <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
         <span class="scan-ip">${ip}</span>
         <span class="scan-latency">${latency}ms</span>
-        ${statusHtml}
+        ${template ? `<span class="scan-status new">${template}</span>` : ''}
+        <span class="scan-status ${exists ? 'exists' : ''}">${exists ? '已存在' : ''}</span>
         <div class="scan-actions">
           <button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')" ${exists ? 'disabled' : ''}>添加</button>
         </div>
