@@ -3,7 +3,7 @@ Write-Host "=== IPMI GUI Builder ===" -ForegroundColor Cyan
 
 # 0. Kill running app
 Write-Host "`n[0/3] Stopping running app..." -ForegroundColor Yellow
-Get-Process -Name "electron","app-builder" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name "ipmi-gui","electron","app-builder" -ErrorAction SilentlyContinue | Stop-Process -Force
 Start-Sleep -Seconds 3
 
 # 1. Clean

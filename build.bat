@@ -2,9 +2,9 @@
 chcp 65001 >nul
 
 echo [1/4] Stopping running app...
+taskkill /f /im ipmi-gui.exe >nul 2>&1
 taskkill /f /im electron.exe >nul 2>&1
 taskkill /f /im app-builder.exe >nul 2>&1
-timeout /t 3 /nobreak >nul
 
 echo [2/4] Cleaning old build...
 if exist dist (
