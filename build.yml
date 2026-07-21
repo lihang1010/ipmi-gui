@@ -13,6 +13,10 @@ files:
 
 asar: true
 
+extraResources:
+  - from: bin
+    to: bin
+
 win:
   target:
     - target: nsis
@@ -29,6 +33,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  uninstallerIcon: assets/icon.ico
   shortcutName: IPMI管理工具
 
 portable:

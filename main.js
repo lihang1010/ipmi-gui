@@ -78,16 +78,14 @@ function buildArgs(server) {
 
 // 获取 ipmitool 路径
 function getIpmiToolPath() {
-  const exeDir = path.dirname(app.getPath('exe'));
-
   // 按优先级查找
   const searchPaths = [
-    // 1. 打包后：exe同级目录/resources/bin/ipmitool.exe
-    path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
-    // 2. 打包后：exe同级目录/bin/ipmitool.exe
-    path.join(exeDir, 'bin', 'ipmitool.exe'),
+    // 1. extraResources: resources/bin/ipmitool.exe
+    path.join(process.resourcesPath, 'bin', 'ipmitool.exe'),
+    // 2. exe 同级目录
+    path.join(path.dirname(app.getPath('exe')), 'resources', 'bin', 'ipmitool.exe'),
     // 3. exe 同目录
-    path.join(exeDir, 'ipmitool.exe'),
+    path.join(path.dirname(app.getPath('exe')), 'ipmitool.exe'),
     // 4. 开发模式：项目 bin 目录
     path.join(__dirname, 'bin', 'ipmitool.exe'),
     // 5. 开发模式：上级 ipmitool 目录
