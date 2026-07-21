@@ -10,10 +10,13 @@ files:
   - "!example_servers.json"
   - "!build.bat"
 
-# 将 bin 目录从 asar 解压出来
 asar: true
 asarUnpack:
   - "bin/**"
+
+extraResources:
+  - from: bin
+    to: bin
 
 win:
   target:
