@@ -33,6 +33,6 @@ echo Verify files:
 dir "dist\win-unpacked\resources\bin\" /b
 echo.
 echo Build complete!
-echo Run: dist\win-unpacked\IPMI管理工具.exe
+echo Run: dist\win-unpacked\ipmi-gui.exe
 echo.
 pause

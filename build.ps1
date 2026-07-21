@@ -25,4 +25,4 @@ Write-Host "`nFiles in resources\bin:" -ForegroundColor Cyan
 Get-ChildItem $binDir | ForEach-Object { Write-Host "  $($_.Name) ($([math]::Round($_.Length/1KB))KB)" }
 
 Write-Host "`n=== Build Complete ===" -ForegroundColor Green
-Write-Host "Run: dist\win-unpacked\IPMI管理工具.exe" -ForegroundColor Green
+Write-Host "Run: dist\win-unpacked\ipmi-gui.exe" -ForegroundColor Green
