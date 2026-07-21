@@ -82,10 +82,10 @@ function getIpmiToolPath() {
 
   // 按优先级查找
   const searchPaths = [
-    // 1. 打包后：exe同级目录/resources/bin/ipmitool.exe
-    path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
-    // 2. 打包后：exe同级目录/bin/ipmitool.exe
+    // 1. extraFiles: exe同级目录/bin/ipmitool.exe
     path.join(exeDir, 'bin', 'ipmitool.exe'),
+    // 2. resources/bin (手动复制)
+    path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
     // 3. exe 同目录
     path.join(exeDir, 'ipmitool.exe'),
     // 4. 开发模式：项目 bin 目录

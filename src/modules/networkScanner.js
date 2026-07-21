@@ -302,10 +302,11 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
     const fs = require('fs');
 
     // 查找 ipmitool 路径 (渲染进程中无法使用 app.getPath)
-    // 打包后 __dirname = resources/app.asar/src/modules
-    // extraResources 会把 bin 目录复制到 resources/bin/
+    // extraFiles 会把 bin 复制到 exe 同级目录/bin/
     const searchPaths = [
-      // 打包后：resources/bin/ipmitool.exe (extraResources)
+      // 打包后：exe同级目录/bin/ipmitool.exe (extraFiles)
+      path.join(__dirname, '..', '..', '..', '..', 'bin', 'ipmitool.exe'),
+      // 打包后：resources/bin/ipmitool.exe
       path.join(__dirname, '..', '..', '..', 'bin', 'ipmitool.exe'),
       // 开发模式：项目 bin 目录
       path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe'),
