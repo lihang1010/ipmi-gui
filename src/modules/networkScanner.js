@@ -298,7 +298,27 @@ async function verifyIPMITemplate(ip, timeout = 1500) {
  */
 async function verifyIPMI(ip, username, password, timeout = 1500) {
   return new Promise((resolve) => {
-    const ipmitoolPath = require('path').join(__dirname, '..', '..', 'bin', 'ipmitool.exe');
+    const path = require('path');
+    const fs = require('fs');
+    const { app } = require('electron');
+
+    // 按优先级查找 ipmitool 路径
+    const exeDir = path.dirname(app.getPath('exe'));
+    const searchPaths = [
+      path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
+      path.join(exeDir, 'bin', 'ipmitool.exe'),
+      path.join(exeDir, 'ipmitool.exe'),
+      path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe'),
+      'D:\\tools\\ipmitool\\ipmitool.exe'
+    ];
+
+    let ipmitoolPath = searchPaths[0];
+    for (const p of searchPaths) {
+      if (fs.existsSync(p)) {
+        ipmitoolPath = p;
+        break;
+      }
+    }
 
     // 保存密码到临时文件，避免特殊字符问题
     const tmpFile = require('path').join(require('os').tmpdir(), `ipmi_pwd_${Date.now()}.txt`);

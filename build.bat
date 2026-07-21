@@ -1,46 +1,49 @@
 @echo off
 chcp 65001 >nul
 
-echo [1/4] Stopping running app...
+echo [1/5] Stopping running app...
 taskkill /f /im ipmi-gui.exe >nul 2>&1
 taskkill /f /im electron.exe >nul 2>&1
 taskkill /f /im app-builder.exe >nul 2>&1
 
-echo [2/4] Cleaning old build...
+echo [2/5] Cleaning old build...
 if exist dist (
     rd /s /q dist 2>nul
     if exist dist (
-        echo Warning: dist folder still exists, retrying...
-        timeout /t 2 /nobreak >nul
+        echo WARNING: dist folder still exists, retrying...
         rd /s /q dist 2>nul
     )
 )
 if exist dist (
-    echo ERROR: Cannot remove dist folder. Please close any file explorer windows
-    echo        pointing to the dist directory and try again.
+    echo ERROR: Cannot remove dist folder. Please close any file explorer windows.
     pause
     exit /b 1
 )
 
-echo [3/4] Building app...
-call npx electron-builder --win nsis
+echo [3/5] Building app...
+call npx electron-builder --win nsis --dir
 if errorlevel 1 (
     echo Build failed!
     pause
     exit /b 1
 )
 
-echo [4/4] Verifying build output...
-if exist "dist\win-unpacked\resources\bin\ipmitool.exe" (
-    echo SUCCESS: ipmitool.exe found in resources\bin\
-    dir "dist\win-unpacked\resources\bin\" /b
-) else (
-    echo WARNING: ipmitool.exe not found in expected location
-    echo Checking asar contents...
-    if exist "dist\win-unpacked\resources\app.asar.unpacked" (
-        echo Unpacked directory exists
-        dir "dist\win-unpacked\resources\app.asar.unpacked\" /b
-    )
+echo [4/5] Copying ipmitool files...
+if not exist "dist\win-unpacked\resources\bin" mkdir "dist\win-unpacked\resources\bin"
+copy /y "bin\ipmitool.exe" "dist\win-unpacked\resources\bin\"
+copy /y "bin\cygwin1.dll" "dist\win-unpacked\resources\bin\"
+copy /y "bin\cygcrypto-1.0.0.dll" "dist\win-unpacked\resources\bin\"
+copy /y "bin\cygz.dll" "dist\win-unpacked\resources\bin\"
+
+echo Verifying ipmitool files:
+dir "dist\win-unpacked\resources\bin\" /b
+
+echo [5/5] Creating NSIS installer...
+call npx electron-builder --win nsis
+if errorlevel 1 (
+    echo Package failed!
+    pause
+    exit /b 1
 )
 
 echo.

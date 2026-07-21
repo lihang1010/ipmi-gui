@@ -9,14 +9,9 @@ files:
   - "!dist/**/*"
   - "!example_servers.json"
   - "!build.bat"
+  - "!bin/**"
 
 asar: true
-asarUnpack:
-  - "bin/**"
-
-extraResources:
-  - from: bin
-    to: bin
 
 win:
   target:
