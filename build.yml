@@ -9,13 +9,10 @@ files:
   - "!dist/**/*"
   - "!example_servers.json"
   - "!build.bat"
+  - "!build-installer.bat"
   - "!bin/**"
 
 asar: true
-
-extraResources:
-  - from: bin
-    to: bin
 
 win:
   target:
