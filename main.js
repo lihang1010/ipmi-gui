@@ -297,9 +297,10 @@ ipcMain.handle('dialog:selectFile', async (event, filters) => {
 app.whenReady().then(createWindow);
 
 app.on('window-all-closed', () => {
-  if (ptyProcess) {
-    ptyProcess.kill();
-  }
+  // 关闭所有 pty 进程
+  Object.values(ptyProcesses).forEach(proc => {
+    try { proc.kill(); } catch (e) {}
+  });
   if (process.platform !== 'darwin') {
     app.quit();
   }
