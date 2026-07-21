@@ -300,15 +300,16 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
   return new Promise((resolve) => {
     const path = require('path');
     const fs = require('fs');
-    const { app } = require('electron');
 
-    // 按优先级查找 ipmitool 路径
-    const exeDir = path.dirname(app.getPath('exe'));
+    // 查找 ipmitool 路径 (渲染进程中无法使用 app.getPath)
+    // 打包后 __dirname = resources/app.asar/src/modules
+    // 需要向上 3 级到达 resources/ 目录
     const searchPaths = [
-      path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
-      path.join(exeDir, 'bin', 'ipmitool.exe'),
-      path.join(exeDir, 'ipmitool.exe'),
+      // 打包后：resources/bin/ipmitool.exe
+      path.join(__dirname, '..', '..', '..', 'bin', 'ipmitool.exe'),
+      // 开发模式：项目 bin 目录
       path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe'),
+      // 兜底
       'D:\\tools\\ipmitool\\ipmitool.exe'
     ];
 
