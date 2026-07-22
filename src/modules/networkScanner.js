@@ -301,6 +301,8 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
     const path = require('path');
     const fs = require('fs');
 
+    console.log(`[VERIFY-DEBUG] __dirname = ${__dirname}`);
+
     // 查找 ipmitool 路径 (渲染进程中无法使用 app.getPath)
     // 打包后 __dirname = resources/app.asar/src/modules
     // 需要向上 3 级到达 resources/ 目录，然后找 bin/
@@ -315,6 +317,12 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
       'D:\\tools\\ipmitool\\ipmitool.exe'
     ];
 
+    console.log(`[VERIFY-DEBUG] Search paths:`);
+    searchPaths.forEach((p, i) => {
+      const exists = fs.existsSync(p);
+      console.log(`  [${i}] ${p} -> ${exists ? 'FOUND' : 'NOT FOUND'}`);
+    });
+
     let ipmitoolPath = searchPaths[0];
     for (const p of searchPaths) {
       if (fs.existsSync(p)) {
@@ -322,6 +330,7 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
         break;
       }
     }
+    console.log(`[VERIFY-DEBUG] Using ipmitool: ${ipmitoolPath}`);
 
     // 保存密码到临时文件，避免特殊字符问题
     const tmpFile = require('path').join(require('os').tmpdir(), `ipmi_pwd_${Date.now()}.txt`);
@@ -358,7 +367,11 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
         );
         
         const success = !err && hasHexOutput && hasNoAuthError;
-        
+
+        console.log(`[VERIFY-DEBUG] Result: success=${success}, err=${err ? err.message : 'none'}`);
+        console.log(`[VERIFY-DEBUG] stdout: ${stdout ? stdout.trim().substring(0, 100) : 'empty'}`);
+        console.log(`[VERIFY-DEBUG] stderr: ${stderr ? stderr.trim().substring(0, 100) : 'empty'}`);
+
         resolve({
           success,
           output: stdout ? stdout.trim() : '',
@@ -367,9 +380,10 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
       }
     );
 
-    proc.on('error', () => {
+    proc.on('error', (e) => {
+      console.log(`[VERIFY-DEBUG] Process error: ${e.message}`);
       try { require('fs').unlinkSync(tmpFile); } catch (e) {}
-      resolve({ success: false, error: '执行失败' });
+      resolve({ success: false, error: '执行失败: ' + e.message });
     });
   });
 }
