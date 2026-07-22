@@ -337,31 +337,11 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
     }
     console.log(`[VERIFY-DEBUG] Using ipmitool: ${ipmitoolPath}`);
 
-    // 保存密码到临时文件，避免特殊字符问题
-    const os = require('os');
-    const tmpDir = os.tmpdir();
-    const tmpFile = path.join(tmpDir, `ipmi_pwd_${Date.now()}.txt`);
-
-    try {
-      require('fs').writeFileSync(tmpFile, password, 'utf-8');
-      // 验证文件确实写入成功
-      if (!require('fs').existsSync(tmpFile)) {
-        console.log(`[VERIFY-DEBUG] Failed to create temp file: ${tmpFile}`);
-        resolve({ success: false, error: '无法创建临时文件' });
-        return;
-      }
-    } catch (writeErr) {
-      console.log(`[VERIFY-DEBUG] Temp file write error: ${writeErr.message}`);
-      resolve({ success: false, error: '临时文件写入失败: ' + writeErr.message });
-      return;
-    }
-
-    console.log(`[VERIFY-DEBUG] Temp file created: ${tmpFile}`);
-
+    // 直接使用 -P 传递密码，避免临时文件问题
     const args = [
       '-H', ip,
       '-U', username,
-      '-f', tmpFile,
+      '-P', password,
       '-I', 'lanplus',
       '-C', '17',
       '-N', '1',
@@ -376,8 +356,6 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
       cmd,
       { timeout, windowsHide: true },
       (err, stdout, stderr) => {
-        // 清理临时文件
-        try { require('fs').unlinkSync(tmpFile); } catch (e) {}
 
         // 严格的成功条件：
         // 1. 没有错误
@@ -407,7 +385,6 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
 
     proc.on('error', (e) => {
       console.log(`[VERIFY-DEBUG] Process error: ${e.message}`);
-      try { require('fs').unlinkSync(tmpFile); } catch (e) {}
       resolve({ success: false, error: '执行失败: ' + e.message });
     });
   });
