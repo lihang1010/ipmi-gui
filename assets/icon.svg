@@ -1,37 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
-  <!-- Background circle - lighter blue gradient -->
+  <!-- Square background with rounded corners -->
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" style="stop-color:#2196F3;stop-opacity:1" />
       <stop offset="100%" style="stop-color:#1565C0;stop-opacity:1" />
     </linearGradient>
   </defs>
-  <circle cx="64" cy="64" r="60" fill="url(#bgGrad)" stroke="#0D47A1" stroke-width="2"/>
+  <rect x="4" y="4" width="120" height="120" rx="16" fill="url(#bgGrad)" stroke="#0D47A1" stroke-width="2"/>
   
-  <!-- Server rack icon - white/light gray -->
-  <rect x="34" y="24" width="60" height="80" rx="4" fill="#E3F2FD" stroke="#90CAF9" stroke-width="1"/>
+  <!-- IPMI text - large and bold -->
+  <text x="64" y="72" font-family="Arial, Helvetica, sans-serif" font-size="42" font-weight="bold" fill="#FFFFFF" text-anchor="middle" letter-spacing="2">IPMI</text>
   
-  <!-- Server slot 1 -->
-  <rect x="40" y="30" width="48" height="16" rx="2" fill="#BBDEFB" stroke="#90CAF9" stroke-width="0.5"/>
-  <circle cx="48" cy="38" r="2" fill="#4CAF50"/>
-  <rect x="54" y="36" width="24" height="4" rx="1" fill="#90CAF9"/>
+  <!-- Subtitle line -->
+  <rect x="24" y="82" width="80" height="3" rx="1.5" fill="#FFFFFF" opacity="0.6"/>
   
-  <!-- Server slot 2 -->
-  <rect x="40" y="52" width="48" height="16" rx="2" fill="#BBDEFB" stroke="#90CAF9" stroke-width="0.5"/>
-  <circle cx="48" cy="60" r="2" fill="#4CAF50"/>
-  <rect x="54" y="58" width="24" height="4" rx="1" fill="#90CAF9"/>
+  <!-- Small decorative dots -->
+  <circle cx="34" cy="100" r="3" fill="#4CAF50"/>
+  <circle cx="64" cy="100" r="3" fill="#4CAF50"/>
+  <circle cx="94" cy="100" r="3" fill="#4CAF50"/>
   
-  <!-- Server slot 3 -->
-  <rect x="40" y="74" width="48" height="16" rx="2" fill="#BBDEFB" stroke="#90CAF9" stroke-width="0.5"/>
-  <circle cx="48" cy="82" r="2" fill="#4CAF50"/>
-  <rect x="54" y="80" width="24" height="4" rx="1" fill="#90CAF9"/>
-  
-  <!-- Network connection lines -->
-  <line x1="64" y1="94" x2="64" y2="110" stroke="#FFFFFF" stroke-width="2" stroke-dasharray="2,2"/>
-  <circle cx="64" cy="114" r="4" fill="#FFFFFF"/>
-  
-  <!-- Status indicator - bright green -->
-  <circle cx="90" cy="30" r="5" fill="#4CAF50">
-    <animate attributeName="opacity" values="1;0.5;1" dur="2s" repeatCount="indefinite"/>
-  </circle>
+  <!-- Top corner accent -->
+  <rect x="12" y="12" width="20" height="4" rx="2" fill="#FFFFFF" opacity="0.4"/>
 </svg>
