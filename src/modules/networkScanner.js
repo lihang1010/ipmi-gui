@@ -273,11 +273,18 @@ async function fullScan(subnet, options = {}) {
  * 验证 IPMI 设备使用哪个模板
  */
 async function verifyIPMITemplate(ip, timeout = 1500) {
-  const templates = [
-    { name: 'AMI', username: 'admin', password: 'admin' },
-    { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
-    { name: 'OpenBMC', username: 'root', password: '0penBmc' }
-  ];
+  // 从配置文件读取凭证
+  let templates;
+  try {
+    templates = require('../config/ipmi-credentials.json').templates;
+  } catch (e) {
+    // 配置文件读取失败时使用默认值
+    templates = [
+      { name: 'AMI', username: 'admin', password: 'admin' },
+      { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
+      { name: 'OpenBMC', username: 'root', password: '0penBmc' }
+    ];
+  }
 
   for (const template of templates) {
     try {

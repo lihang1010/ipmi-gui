@@ -796,12 +796,21 @@ function deselectAllScanResults() {
 async function addSingleScanResult(ip, templateName) {
   const config = getConfig();
 
-  // 模板默认值
-  const templates = {
-    'openUBMC': { username: 'Administrator', password: 'ttytty`12' },
-    'AMI': { username: 'admin', password: 'admin' },
-    'OpenBMC': { username: 'root', password: '0penBmc' }
-  };
+  // 从配置文件读取凭证
+  let credentialTemplates;
+  try {
+    credentialTemplates = require('../config/ipmi-credentials.json').templates;
+  } catch (e) {
+    credentialTemplates = [
+      { name: 'AMI', username: 'admin', password: 'admin' },
+      { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
+      { name: 'OpenBMC', username: 'root', password: '0penBmc' }
+    ];
+  }
+
+  // 转换为以名称为键的对象
+  const templates = {};
+  credentialTemplates.forEach(t => { templates[t.name] = t; });
 
   const template = templates[templateName] || templates['openUBMC'];
 
@@ -831,11 +840,21 @@ async function addSelectedScanResults() {
     return;
   }
 
-  const templates = {
-    'openUBMC': { username: 'Administrator', password: 'ttytty`12' },
-    'AMI': { username: 'admin', password: 'admin' },
-    'OpenBMC': { username: 'root', password: '0penBmc' }
-  };
+  // 从配置文件读取凭证
+  let credentialTemplates;
+  try {
+    credentialTemplates = require('../config/ipmi-credentials.json').templates;
+  } catch (e) {
+    credentialTemplates = [
+      { name: 'AMI', username: 'admin', password: 'admin' },
+      { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
+      { name: 'OpenBMC', username: 'root', password: '0penBmc' }
+    ];
+  }
+
+  // 转换为以名称为键的对象
+  const templates = {};
+  credentialTemplates.forEach(t => { templates[t.name] = t; });
 
   const config = getConfig();
   let added = 0;
