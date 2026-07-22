@@ -61,13 +61,6 @@ function createWindow() {
   });
 
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
-
-  // F12 打开开发者工具
-  mainWindow.webContents.on('before-input-event', (event, input) => {
-    if (input.key === 'F12') {
-      mainWindow.webContents.toggleDevTools();
-    }
-  });
 }
 
 // 构建 ipmitool 参数

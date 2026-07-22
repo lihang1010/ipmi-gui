@@ -289,12 +289,11 @@ async function verifyIPMITemplate(ip, timeout = 1500) {
   for (const template of templates) {
     try {
       const result = await verifyIPMI(ip, template.username, template.password, timeout);
-      console.log(`[VERIFY] ${ip} - ${template.name}: success=${result.success}, output="${result.output}", error="${result.error}"`);
       if (result.success) {
         return template.name;
       }
     } catch (e) {
-      console.log(`[VERIFY] ${ip} - ${template.name}: error - ${e.message}`);
+      // 验证失败，继续尝试下一个模板
     }
   }
   return null;
@@ -308,25 +307,11 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
     const path = require('path');
     const fs = require('fs');
 
-    console.log(`[VERIFY-DEBUG] __dirname = ${__dirname}`);
-
-    // 查找 ipmitool 路径 (渲染进程中无法使用 app.getPath)
-    // 打包后 __dirname = resources/app.asar/src/modules
-    // 需要向上 3 级到达 resources/ 目录，然后找 bin/
     const searchPaths = [
-      // 打包后：resources/bin/ipmitool.exe (手动复制)
       path.join(__dirname, '..', '..', '..', 'bin', 'ipmitool.exe'),
-      // 打包后：resources/app.asar.unpacked/bin/ipmitool.exe
       path.join(__dirname, '..', '..', '..', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
-      // 开发模式：项目 bin 目录
       path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe')
     ];
-
-    console.log(`[VERIFY-DEBUG] Search paths:`);
-    searchPaths.forEach((p, i) => {
-      const exists = fs.existsSync(p);
-      console.log(`  [${i}] ${p} -> ${exists ? 'FOUND' : 'NOT FOUND'}`);
-    });
 
     let ipmitoolPath = searchPaths[0];
     for (const p of searchPaths) {
@@ -335,9 +320,7 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
         break;
       }
     }
-    console.log(`[VERIFY-DEBUG] Using ipmitool: ${ipmitoolPath}`);
 
-    // 直接使用 -P 传递密码，避免临时文件问题
     const args = [
       '-H', ip,
       '-U', username,
@@ -349,17 +332,10 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
       'raw', '6', '1'
     ];
 
-    const cmd = `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`;
-    console.log(`[VERIFY-DEBUG] Command: ${cmd}`);
-
     const proc = exec(
-      cmd,
+      `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`,
       { timeout, windowsHide: true },
       (err, stdout, stderr) => {
-
-        // 严格的成功条件：
-        // 1. 没有错误
-        // 2. stdout 包含十六进制数据（IPMI 响应格式）
         const hasHexOutput = stdout && /^[0-9a-f\s]+$/i.test(stdout.trim());
         const hasNoAuthError = !stderr || (
           !stderr.includes('unauthorized') &&
@@ -368,12 +344,8 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
           !stderr.includes('RAKP') &&
           !stderr.includes('SOL')
         );
-        
-        const success = !err && hasHexOutput && hasNoAuthError;
 
-        console.log(`[VERIFY-DEBUG] Result: success=${success}, err=${err ? err.message : 'none'}`);
-        console.log(`[VERIFY-DEBUG] stdout: ${stdout ? stdout.trim().substring(0, 100) : 'empty'}`);
-        console.log(`[VERIFY-DEBUG] stderr: ${stderr ? stderr.trim().substring(0, 100) : 'empty'}`);
+        const success = !err && hasHexOutput && hasNoAuthError;
 
         resolve({
           success,
@@ -384,7 +356,6 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
     );
 
     proc.on('error', (e) => {
-      console.log(`[VERIFY-DEBUG] Process error: ${e.message}`);
       resolve({ success: false, error: '执行失败: ' + e.message });
     });
   });
