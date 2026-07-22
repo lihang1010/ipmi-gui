@@ -89,20 +89,16 @@ function getIpmiToolPath() {
 
   // 按优先级查找
   const searchPaths = [
-    // 1. asar 解压: resources/app.asar.unpacked/bin/ipmitool.exe
-    path.join(exeDir, 'resources', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
-    // 2. 手动复制: resources/bin/ipmitool.exe
+    // 1. resources/bin/ipmitool.exe (手动复制)
     path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
+    // 2. resources/app.asar.unpacked/bin/ipmitool.exe
+    path.join(exeDir, 'resources', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
     // 3. exe 同级 bin 目录
     path.join(exeDir, 'bin', 'ipmitool.exe'),
     // 4. exe 同目录
     path.join(exeDir, 'ipmitool.exe'),
     // 5. 开发模式：项目 bin 目录
-    path.join(__dirname, 'bin', 'ipmitool.exe'),
-    // 6. 开发模式：上级 ipmitool 目录
-    path.join(__dirname, '..', 'ipmitool', 'ipmitool.exe'),
-    // 7. 兜底
-    'D:\\tools\\ipmitool\\ipmitool.exe'
+    path.join(__dirname, 'bin', 'ipmitool.exe')
   ];
 
   for (const p of searchPaths) {

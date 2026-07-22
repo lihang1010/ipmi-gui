@@ -312,9 +312,7 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
       // 打包后：resources/app.asar.unpacked/bin/ipmitool.exe
       path.join(__dirname, '..', '..', '..', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
       // 开发模式：项目 bin 目录
-      path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe'),
-      // 兜底
-      'D:\\tools\\ipmitool\\ipmitool.exe'
+      path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe')
     ];
 
     console.log(`[VERIFY-DEBUG] Search paths:`);
@@ -333,8 +331,25 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
     console.log(`[VERIFY-DEBUG] Using ipmitool: ${ipmitoolPath}`);
 
     // 保存密码到临时文件，避免特殊字符问题
-    const tmpFile = require('path').join(require('os').tmpdir(), `ipmi_pwd_${Date.now()}.txt`);
-    require('fs').writeFileSync(tmpFile, password);
+    const os = require('os');
+    const tmpDir = os.tmpdir();
+    const tmpFile = path.join(tmpDir, `ipmi_pwd_${Date.now()}.txt`);
+
+    try {
+      require('fs').writeFileSync(tmpFile, password, 'utf-8');
+      // 验证文件确实写入成功
+      if (!require('fs').existsSync(tmpFile)) {
+        console.log(`[VERIFY-DEBUG] Failed to create temp file: ${tmpFile}`);
+        resolve({ success: false, error: '无法创建临时文件' });
+        return;
+      }
+    } catch (writeErr) {
+      console.log(`[VERIFY-DEBUG] Temp file write error: ${writeErr.message}`);
+      resolve({ success: false, error: '临时文件写入失败: ' + writeErr.message });
+      return;
+    }
+
+    console.log(`[VERIFY-DEBUG] Temp file created: ${tmpFile}`);
 
     const args = [
       '-H', ip,
@@ -347,8 +362,11 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
       'raw', '6', '1'
     ];
 
+    const cmd = `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`;
+    console.log(`[VERIFY-DEBUG] Command: ${cmd}`);
+
     const proc = exec(
-      `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`,
+      cmd,
       { timeout, windowsHide: true },
       (err, stdout, stderr) => {
         // 清理临时文件
