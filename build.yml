@@ -10,13 +10,10 @@ files:
   - "!example_servers.json"
   - "!build.bat"
   - "!build-installer.bat"
-  - "!bin/**"
 
 asar: true
-
-extraFiles:
-  - from: bin
-    to: bin
+asarUnpack:
+  - "bin/**"
 
 win:
   target:

@@ -22,9 +22,8 @@ if errorlevel 1 (
 )
 
 echo.
-echo Verify bin files:
-dir "dist\win-unpacked\bin\" /b 2>nul || echo bin not found in win-unpacked
-dir "dist\win-unpacked\resources\bin\" /b 2>nul || echo bin not found in resources
+echo Verify bin in asar unpacked:
+dir "dist\win-unpacked\resources\app.asar.unpacked\bin\" /b 2>nul || echo bin not found
 echo.
 echo === Build Complete ===
 echo Installer:
