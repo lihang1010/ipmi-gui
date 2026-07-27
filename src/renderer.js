@@ -10,7 +10,7 @@ const { SerializeAddon } = require('@xterm/addon-serialize');
 // 导入模块
 const { loadConfig, saveConfig, getConfig } = require('./modules/configStore');
 const { safeAlert, safeConfirm } = require('./modules/modal');
-const { showStatus, clearOutput, isValidIP } = require('./modules/utils');
+const { escapeHtml, showStatus, clearOutput, isValidIP } = require('./modules/utils');
 const { SERVER_TEMPLATES, applyTemplate, updateServerNameFromTemplate } = require('./modules/templates');
 const { executeCommand, executePower, executeSensor, executeRawCommand } = require('./modules/commandRunner');
 const favorites = require('./modules/favorites');
