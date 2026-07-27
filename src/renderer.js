@@ -465,108 +465,112 @@ async function deleteServer() {
 }
 
 async function batchDeleteServer() {
-  const config = getConfig();
-  const servers = config.servers || [];
+  try {
+    const config = getConfig();
+    const servers = config.servers || [];
 
-  if (servers.length === 0) {
-    await safeAlert('没有可删除的服务器');
-    return;
-  }
-
-  const overlay = document.createElement('div');
-  overlay.className = 'dialog-overlay';
-  overlay.style.zIndex = '99999';
-
-  overlay.innerHTML = `
-    <div class="dialog" style="width:520px">
-      <div class="dialog-header">
-        <h3>批量删除服务器</h3>
-        <button class="dialog-close" id="bd-close">&times;</button>
-      </div>
-      <div class="dialog-body" style="padding:var(--space-md) var(--space-lg);max-height:50vh;overflow-y:auto;">
-        <div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;padding:0 4px;">
-          <label style="font-size:12px;color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;gap:6px;">
-            <input type="checkbox" id="bd-select-all"> 全选
-          </label>
-          <span style="font-size:12px;color:var(--text-muted);">共 ' + servers.length + ' 台服务器</span>
-        </div>
-        <div class="batch-delete-list">
-          ${servers.map(s => `
-            <label class="batch-delete-item">
-              <input type="checkbox" class="bd-cb" value="${s.id}">
-              <span class="bd-name">${escapeHtml(s.name)}</span>
-              <span class="bd-host">${escapeHtml(s.host)}</span>
-            </label>
-          `).join('')}
-        </div>
-      </div>
-      <div class="dialog-footer">
-        <button class="btn" id="bd-cancel">取消</button>
-        <button class="btn btn-danger" id="bd-confirm" disabled>删除选中 (<span id="bd-count">0</span>)</button>
-      </div>
-    </div>
-  `;
-
-  document.body.appendChild(overlay);
-
-  const cbs = overlay.querySelectorAll('.bd-cb');
-  const selAll = overlay.getElementById('bd-select-all');
-  const countSpan = overlay.getElementById('bd-count');
-  const confirmBtn = overlay.getElementById('bd-confirm');
-
-  const updateCount = () => {
-    const checked = overlay.querySelectorAll('.bd-cb:checked').length;
-    countSpan.textContent = checked;
-    confirmBtn.disabled = checked === 0;
-    if (selAll) selAll.checked = checked === cbs.length;
-  };
-
-  const closeOverlay = () => overlay.remove();
-
-  selAll.addEventListener('change', () => {
-    cbs.forEach(cb => cb.checked = selAll.checked);
-    updateCount();
-  });
-
-  cbs.forEach(cb => cb.addEventListener('change', updateCount));
-  overlay.getElementById('bd-close').addEventListener('click', closeOverlay);
-  overlay.getElementById('bd-cancel').addEventListener('click', closeOverlay);
-
-  confirmBtn.addEventListener('click', async () => {
-    const selected = [...overlay.querySelectorAll('.bd-cb:checked')].map(cb => cb.value);
-    if (selected.length === 0) return;
-    closeOverlay();
-
-    const ok = await safeConfirm('确定删除选中的 ' + selected.length + ' 台服务器吗？\n\n此操作不可撤销！');
-    if (!ok) return;
-
-    const cfg = getConfig();
-    cfg.servers = cfg.servers.filter(s => !selected.includes(s.id));
-    saveConfig();
-    updateServerList();
-
-    const cur = getCurrentServer();
-    if (cur && selected.includes(cur.id)) {
-      setCurrentServer(null);
-      showStatus('idle', '未选择服务器');
+    if (servers.length === 0) {
+      await safeAlert('没有可删除的服务器');
+      return;
     }
 
-    showStatus('connected', '已删除 ' + selected.length + ' 台服务器');
-  });
+    const listHtml = servers.map(s =>
+      '<label class="batch-delete-item">' +
+        '<input type="checkbox" class="bd-cb" value="' + s.id + '">' +
+        '<span class="bd-name">' + escapeHtml(s.name) + '</span>' +
+        '<span class="bd-host">' + escapeHtml(s.host) + '</span>' +
+      '</label>'
+    ).join('');
 
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) closeOverlay();
-  });
+    const overlay = document.createElement('div');
+    overlay.className = 'dialog-overlay';
+    overlay.style.zIndex = '99999';
 
-  const onKeydown = (e) => {
-    if (e.key === 'Escape') {
-      document.removeEventListener('keydown', onKeydown);
+    overlay.innerHTML =
+      '<div class="dialog" style="width:520px">' +
+        '<div class="dialog-header">' +
+          '<h3>批量删除服务器</h3>' +
+          '<button class="dialog-close" id="bd-close">&times;</button>' +
+        '</div>' +
+        '<div class="dialog-body" style="padding:var(--space-md) var(--space-lg);max-height:50vh;overflow-y:auto;">' +
+          '<div style="margin-bottom:12px;display:flex;align-items:center;gap:10px;padding:0 4px;">' +
+            '<label style="font-size:12px;color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;gap:6px;">' +
+              '<input type="checkbox" id="bd-select-all"> 全选' +
+            '</label>' +
+            '<span style="font-size:12px;color:var(--text-muted);">共 ' + servers.length + ' 台服务器</span>' +
+          '</div>' +
+          '<div class="batch-delete-list">' + listHtml + '</div>' +
+        '</div>' +
+        '<div class="dialog-footer">' +
+          '<button class="btn" id="bd-cancel">取消</button>' +
+          '<button class="btn btn-danger" id="bd-confirm" disabled>删除选中 (<span id="bd-count">0</span>)</button>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(overlay);
+
+    const cbs = overlay.querySelectorAll('.bd-cb');
+    const selAll = overlay.getElementById('bd-select-all');
+    const countSpan = overlay.getElementById('bd-count');
+    const confirmBtn = overlay.getElementById('bd-confirm');
+
+    const updateCount = () => {
+      const checked = overlay.querySelectorAll('.bd-cb:checked').length;
+      countSpan.textContent = checked;
+      confirmBtn.disabled = checked === 0;
+      if (selAll) selAll.checked = checked === cbs.length;
+    };
+
+    const closeOverlay = () => overlay.remove();
+
+    selAll.addEventListener('change', () => {
+      cbs.forEach(cb => cb.checked = selAll.checked);
+      updateCount();
+    });
+
+    cbs.forEach(cb => cb.addEventListener('change', updateCount));
+    overlay.getElementById('bd-close').addEventListener('click', closeOverlay);
+    overlay.getElementById('bd-cancel').addEventListener('click', closeOverlay);
+
+    confirmBtn.addEventListener('click', async () => {
+      const selected = [...overlay.querySelectorAll('.bd-cb:checked')].map(cb => cb.value);
+      if (selected.length === 0) return;
       closeOverlay();
-    }
-  };
-  document.addEventListener('keydown', onKeydown);
 
-  updateCount();
+      const ok = await safeConfirm('确定删除选中的 ' + selected.length + ' 台服务器吗？\n\n此操作不可撤销！');
+      if (!ok) return;
+
+      const cfg = getConfig();
+      cfg.servers = cfg.servers.filter(s => !selected.includes(s.id));
+      saveConfig();
+      updateServerList();
+
+      const cur = getCurrentServer();
+      if (cur && selected.includes(cur.id)) {
+        setCurrentServer(null);
+        showStatus('idle', '未选择服务器');
+      }
+
+      showStatus('connected', '已删除 ' + selected.length + ' 台服务器');
+    });
+
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeOverlay();
+    });
+
+    const onKeydown = (e) => {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', onKeydown);
+        closeOverlay();
+      }
+    };
+    document.addEventListener('keydown', onKeydown);
+
+    updateCount();
+  } catch (e) {
+    console.error('batchDeleteServer error:', e);
+    await safeAlert('操作失败: ' + e.message);
+  }
 }
 
 // ========== 连接测试 ==========
