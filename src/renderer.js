@@ -510,9 +510,9 @@ async function batchDeleteServer() {
     document.body.appendChild(overlay);
 
     const cbs = overlay.querySelectorAll('.bd-cb');
-    const selAll = overlay.getElementById('bd-select-all');
-    const countSpan = overlay.getElementById('bd-count');
-    const confirmBtn = overlay.getElementById('bd-confirm');
+    const selAll = document.getElementById('bd-select-all');
+    const countSpan = document.getElementById('bd-count');
+    const confirmBtn = document.getElementById('bd-confirm');
 
     const updateCount = () => {
       const checked = overlay.querySelectorAll('.bd-cb:checked').length;
@@ -529,8 +529,8 @@ async function batchDeleteServer() {
     });
 
     cbs.forEach(cb => cb.addEventListener('change', updateCount));
-    overlay.getElementById('bd-close').addEventListener('click', closeOverlay);
-    overlay.getElementById('bd-cancel').addEventListener('click', closeOverlay);
+    document.getElementById('bd-close').addEventListener('click', closeOverlay);
+    document.getElementById('bd-cancel').addEventListener('click', closeOverlay);
 
     confirmBtn.addEventListener('click', async () => {
       const selected = [...overlay.querySelectorAll('.bd-cb:checked')].map(cb => cb.value);
