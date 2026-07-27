@@ -490,6 +490,43 @@ body {
   color: var(--warning);
 }
 
+.scan-status.warning {
+  background: var(--danger-subtle);
+  color: var(--danger);
+  cursor: help;
+}
+
+.scan-status.unknown {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-muted);
+}
+
+.scan-ports {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-left: 8px;
+}
+
+.scan-port-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-family: var(--font-mono);
+  font-weight: 500;
+  border-radius: 3px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border: 1px solid rgba(91, 155, 213, 0.25);
+  white-space: nowrap;
+}
+
+.scan-port-badge:hover {
+  background: var(--accent);
+  color: #fff;
+}
+
 .scan-actions {
   margin-left: auto;
   display: flex;

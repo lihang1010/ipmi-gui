@@ -756,14 +756,28 @@ function renderScanResults(results) {
     const ip = typeof item === 'string' ? item : item.ip;
     const latency = typeof item === 'object' ? item.latency : 0;
     const template = typeof item === 'object' ? item.template : null;
+    const ports = typeof item === 'object' ? item.ports : null;
+    const verified = typeof item === 'object' ? item.verified : false;
+    const verifyHint = typeof item === 'object' ? item.verifyHint : null;
     const exists = existingIPs.includes(ip);
+
+    // 构建验证状态标签
+    let verifyBadge = '';
+    if (template) {
+      verifyBadge = '<span class="scan-status new" title="IPMI 验证通过，使用 ' + template + ' 凭据">' + template + '</span>';
+    } else if (verifyHint) {
+      verifyBadge = '<span class="scan-status warning" title="' + verifyHint + '">凭据错误?</span>';
+    } else {
+      verifyBadge = '<span class="scan-status unknown">未验证</span>';
+    }
 
     return `
       <div class="scan-result-item ${exists ? 'already-exists' : ''}">
         <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
         <span class="scan-ip">${ip}</span>
         <span class="scan-latency">${latency}ms</span>
-        ${template ? `<span class="scan-status new">${template}</span>` : ''}
+        ${ports ? '<span class="scan-ports">' + Object.entries(ports).filter(([p, open]) => open).map(([p]) => '<span class="scan-port-badge">' + p + '</span>').join('') + '</span>' : ''}
+        ${verifyBadge}
         <span class="scan-status ${exists ? 'exists' : ''}">${exists ? '已存在' : ''}</span>
         <div class="scan-actions">
           <button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')" ${exists ? 'disabled' : ''}>添加</button>

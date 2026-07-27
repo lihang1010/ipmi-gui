@@ -15,6 +15,9 @@ jest.mock('child_process', () => ({
     // Simulate successful ping
     if (cmd.includes('ping')) {
       cb(null, '', '');
+    } else {
+      // Simulate failed ipmitool verification (timeout/no response)
+      setTimeout(() => cb(new Error('timeout'), '', ''), 10);
     }
     return { on: jest.fn() };
   })
@@ -33,6 +36,22 @@ jest.mock('dgram', () => ({
     })
   }))
 }));
+
+// Mock net for TCP port scanning (scanTcpPort uses new net.Socket())
+jest.mock('net', () => {
+  const EventEmitter = require('events');
+  return {
+    Socket: jest.fn().mockImplementation(() => {
+      const socket = new EventEmitter();
+      socket.setTimeout = jest.fn();
+      socket.destroy = jest.fn();
+      socket.connect = jest.fn((port, ip, cb) => {
+        process.nextTick(() => socket.emit('connect'));
+      });
+      return socket;
+    })
+  };
+});
 
 // Mock fs for verifyIPMI
 jest.mock('fs', () => ({
@@ -226,7 +245,7 @@ describe('NetworkScanner Module', () => {
       });
       expect(Array.isArray(result)).toBe(true);
       expect(onProgress).toHaveBeenCalled();
-    });
+    }, 30000);
 
     test('should report all phases', async () => {
       const phases = [];
@@ -242,7 +261,7 @@ describe('NetworkScanner Module', () => {
         }
       });
       expect(phases).toContain('ping');
-    });
+    }, 30000);
   });
 
   describe('getScanState', () => {

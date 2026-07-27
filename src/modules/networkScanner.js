@@ -92,6 +92,28 @@ function scanPort(ip, port = 623, timeout = 300) {
 }
 
 /**
+ * 扫描单个 TCP 端口
+ */
+function scanTcpPort(ip, port, timeout = 300) {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    socket.setTimeout(timeout);
+    socket.on('connect', () => {
+      socket.destroy();
+      resolve(true);
+    });
+    socket.on('timeout', () => {
+      socket.destroy();
+      resolve(false);
+    });
+    socket.on('error', () => {
+      resolve(false);
+    });
+    socket.connect(port, ip);
+  });
+}
+
+/**
  * 限制并发的异步执行器
  */
 async function runWithLimit(tasks, limit, onItemDone) {
@@ -219,15 +241,49 @@ async function fullScan(subnet, options = {}) {
     scanState.phase = 'port';
     if (onProgress) onProgress({ phase: 'port', current: 0, total: alive.length, found: [] });
 
-    found = await portScan(alive.map(a => a.ip), {
-      concurrency: portConcurrency,
-      timeout: portTimeout,
-      onProgress: (current, total, f) => {
-        if (onProgress) onProgress({ phase: 'port', current, total, found: f });
-      }
+    // 扫描目标端口：UDP 623 (RMCP) + TCP 623 (RMCP+) + TCP 80/443 (Web)
+    const portTargets = [
+      { port: 623, proto: 'udp', label: 'UDP:623' },
+      { port: 623, proto: 'tcp', label: 'TCP:623' },
+      { port: 80,  proto: 'tcp', label: 'TCP:80' },
+      { port: 443, proto: 'tcp', label: 'TCP:443' }
+    ];
+
+    const portTasks = alive.map(item => {
+      return async () => {
+        const ip = item.ip;
+        const start = Date.now();
+        const portResults = {};
+
+        // 并行扫描该主机的所有目标端口
+        const scans = portTargets.map(target => {
+          if (target.proto === 'udp') return scanPort(ip, target.port, portTimeout);
+          return scanTcpPort(ip, target.port, portTimeout);
+        });
+
+        const scanResults = await Promise.all(scans);
+        portTargets.forEach((target, i) => { portResults[target.label] = scanResults[i]; });
+
+        const latency = Date.now() - start;
+        const anyOpen = Object.values(portResults).some(v => v === true);
+        // 过滤：仅 UDP:623 开放，或 UDP:623 + TCP:80 开放的设备不进入验证
+        if (anyOpen && !portResults['TCP:623'] && !portResults['TCP:443']) {
+          return null;
+        }
+        return anyOpen ? { ip, latency, ports: portResults } : null;
+      };
     });
 
-    console.log(`[SCAN] 端口扫描完成: ${found.length} 台设备有 IPMI 端口`);
+    await runWithLimit(portTasks, portConcurrency, (i, total, allResults) => {
+      const current = i + 1;
+      scanState.current = current;
+      const foundItems = allResults.filter(Boolean);
+      scanState.results = foundItems;
+      if (onProgress) onProgress({ phase: 'port', current, total, found: foundItems });
+    });
+
+    found = scanState.results;
+    console.log(`[SCAN] 端口扫描完成: ${found.length} 台设备有开放端口`, found.map(f => ({ ip: f.ip, ports: f.ports })));
   }
 
   // 第三步：IPMI 验证（并行验证，只保留验证成功的 BMC 设备）
@@ -237,33 +293,34 @@ async function fullScan(subnet, options = {}) {
     if (onProgress) onProgress({ phase: 'verify', current: 0, total: found.length, found });
 
     const verifyConcurrency = 5;
-    const verified = [];
     let verifyCurrent = 0;
 
     const tasks = found.map(device => {
       return async () => {
         const template = await verifyIPMITemplate(device.ip);
         device.template = template;
-        if (template) {
-          verified.push(device);
+        device.verified = !!template;
+
+        // 分析验证失败原因
+        if (!template && device.ports && device.ports['TCP:623']) {
+          device.verifyHint = 'TCP:623 开放但验证失败，可能是非默认凭据的 AMI BMC';
         }
+
         verifyCurrent++;
-        if (onProgress) onProgress({ phase: 'verify', current: verifyCurrent, total: found.length, found: [...verified] });
-        return template ? device : null;
+        if (onProgress) onProgress({ phase: 'verify', current: verifyCurrent, total: found.length, found });
+        return device;
       };
     });
 
     await runWithLimit(tasks, verifyConcurrency);
 
-    // 只保留验证成功的设备
-    found.length = 0;
-    found.push(...verified);
   }
-
+ 
   scanState.results = found;
 
-  console.log(`[SCAN] 扫描完成: 共 ${found.length} 台设备`);
-  found.forEach(f => console.log(`  - ${f.ip}: template=${f.template || 'null'}`));
+  const verifiedCount = found.filter(d => d.verified).length;
+  console.log(`[SCAN] 扫描完成: 共 ${found.length} 台设备（已验证 ${verifiedCount} 台）`);
+  found.forEach(f => console.log(`  - ${f.ip}: verified=${f.verified}, template=${f.template || '-'}${f.verifyHint ? ', hint=' + f.verifyHint : ''}`));
 
   scanState.running = false;
   return scanState.results;
@@ -379,6 +436,7 @@ module.exports = {
   getLocalNetwork,
   pingHost,
   scanPort,
+  scanTcpPort,
   pingScan,
   portScan,
   fullScan,
