@@ -347,6 +347,45 @@ body {
   opacity: 0.5;
 }
 
+/* --- Batch Delete Dialog --- */
+.batch-delete-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.batch-delete-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  margin-bottom: 2px;
+}
+
+.batch-delete-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.batch-delete-item .bd-cb {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.bd-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  min-width: 120px;
+}
+
+.bd-host {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
 /* --- Tabs --- */
 .tabs {
   display: flex;
