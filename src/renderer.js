@@ -888,11 +888,11 @@ function renderScanResults(results) {
       <div class="scan-result-item ${exists ? 'already-exists' : ''}">
         <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
         <span class="scan-ip">${ip}</span>
-        ${productName ? '<span class="scan-product" title="' + (productSource ? '来源: ' + productSource : '') + '">' + productName + '</span>' : ''}
         <span class="scan-latency">${latency}ms</span>
         ${ports ? '<span class="scan-ports">' + Object.entries(ports).filter(([p, open]) => open).map(([p]) => '<span class="scan-port-badge">' + p + '</span>').join('') + '</span>' : ''}
         ${verifyBadge}
         <span class="scan-status ${exists ? 'exists' : ''}">${exists ? '已存在' : ''}</span>
+        ${productName ? '<span class="scan-product" title="' + (productSource ? '来源: ' + productSource : '') + '">' + productName + '</span>' : ''}
         <div class="scan-actions">
           <button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')" ${exists ? 'disabled' : ''}>添加</button>
         </div>

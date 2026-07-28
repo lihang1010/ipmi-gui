@@ -375,6 +375,14 @@ async function fullScan(subnet, options = {}) {
         device.template = template;
         device.verified = !!template;
 
+        // openUBMC: 验证通过后取 FRU Board Product 拼合产品名
+        if (template === 'openUBMC' && device.productName) {
+          const bp = await fetchFruBoardProduct(device.ip);
+          if (bp) {
+            device.productName = bp + '/' + device.productName;
+          }
+        }
+
         // 分析验证失败原因
         if (!template && device.ports && device.ports['TCP:623']) {
           device.verifyHint = 'TCP:623 开放但验证失败，可能是非默认凭据的 AMI BMC';
@@ -493,6 +501,56 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
 }
 
 /**
+ * 获取 openUBMC 设备的 FRU Board Product
+ * 使用默认凭据运行 ipmitool fru print 0，解析 Board Product 字段
+ */
+async function fetchFruBoardProduct(ip, timeout = 1500) {
+  const username = 'Administrator';
+  const password = 'ttytty`12';
+
+  return new Promise((resolve) => {
+    const path = require('path');
+    const fs = require('fs');
+
+    const searchPaths = [
+      path.join(__dirname, '..', '..', '..', 'bin', 'ipmitool.exe'),
+      path.join(__dirname, '..', '..', '..', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
+      path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe')
+    ];
+
+    let ipmitoolPath = searchPaths[0];
+    for (const p of searchPaths) {
+      if (fs.existsSync(p)) { ipmitoolPath = p; break; }
+    }
+
+    const args = [
+      '-H', ip,
+      '-U', username,
+      '-P', password,
+      '-I', 'lanplus',
+      '-C', '17',
+      'fru', 'print', '0'
+    ];
+
+    const proc = exec(
+      '"' + ipmitoolPath + '" ' + args.map(a => '"' + a + '"').join(' '),
+      { timeout, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (stdout) {
+          const match = stdout.match(/Board Product\s*:\s*(.+)/m);
+          if (match) resolve(match[1].trim());
+          else resolve(null);
+        } else {
+          resolve(null);
+        }
+      }
+    );
+
+    proc.on('error', () => resolve(null));
+  });
+}
+
+/**
  * 获取扫描状态
  */
 function getScanState() {
@@ -513,6 +571,7 @@ module.exports = {
   scanTcpPort,
   tryHttpFetch,
   httpProbeDevice,
+  fetchFruBoardProduct,
   pingScan,
   portScan,
   fullScan,
