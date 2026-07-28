@@ -870,6 +870,8 @@ function renderScanResults(results) {
     const ports = typeof item === 'object' ? item.ports : null;
     const verified = typeof item === 'object' ? item.verified : false;
     const verifyHint = typeof item === 'object' ? item.verifyHint : null;
+    const productName = typeof item === 'object' ? item.productName : null;
+    const productSource = typeof item === 'object' ? item.productSource : null;
     const exists = existingIPs.includes(ip);
 
     // 构建验证状态标签
@@ -886,6 +888,7 @@ function renderScanResults(results) {
       <div class="scan-result-item ${exists ? 'already-exists' : ''}">
         <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
         <span class="scan-ip">${ip}</span>
+        ${productName ? '<span class="scan-product" title="' + (productSource ? '来源: ' + productSource : '') + '">' + productName + '</span>' : ''}
         <span class="scan-latency">${latency}ms</span>
         ${ports ? '<span class="scan-ports">' + Object.entries(ports).filter(([p, open]) => open).map(([p]) => '<span class="scan-port-badge">' + p + '</span>').join('') + '</span>' : ''}
         ${verifyBadge}

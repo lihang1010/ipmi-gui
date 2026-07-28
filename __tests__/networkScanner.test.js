@@ -53,6 +53,32 @@ jest.mock('net', () => {
   };
 });
 
+// Mock http/https for HTTP product probe (tryHttpFetch)
+const mockHttpResponse = () => {
+  const res = { on: jest.fn(), statusCode: 404 };
+  res.on.mockImplementation((event, handler) => {
+    if (event === 'data') setImmediate(() => handler(''));
+    if (event === 'end') setImmediate(() => handler());
+    return res;
+  });
+  return res;
+};
+const mockHttpReq = { on: jest.fn(), destroy: jest.fn() };
+
+jest.mock('https', () => ({
+  get: jest.fn((opts, cb) => {
+    setImmediate(() => cb(mockHttpResponse()));
+    return mockHttpReq;
+  })
+}));
+
+jest.mock('http', () => ({
+  get: jest.fn((opts, cb) => {
+    setImmediate(() => cb(mockHttpResponse()));
+    return mockHttpReq;
+  })
+}));
+
 // Mock fs for verifyIPMI
 jest.mock('fs', () => ({
   existsSync: jest.fn().mockReturnValue(true),

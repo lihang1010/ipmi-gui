@@ -509,6 +509,18 @@ body {
   -webkit-user-select: text;
 }
 
+.scan-product {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  margin-left: 8px;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: help;
+}
+
 .scan-latency {
   font-size: 11px;
   color: var(--text-muted);

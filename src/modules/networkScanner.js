@@ -114,6 +114,67 @@ function scanTcpPort(ip, port, timeout = 300) {
 }
 
 /**
+ * HTTP GET 请求并解析响应
+ */
+function tryHttpFetch(ip, port, path, timeout, parser) {
+  return new Promise((resolve) => {
+    const isHttps = port === 443;
+    const mod = isHttps ? require('https') : require('http');
+    const req = mod.get({
+      hostname: ip,
+      port: port,
+      path: path,
+      rejectUnauthorized: false,
+      timeout: timeout,
+      headers: { 'Accept': 'application/json' }
+    }, (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        const result = parser(data, res.statusCode);
+        resolve(result);
+      });
+    });
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+/**
+ * HTTP 产品探测 - 通过无鉴权 API 获取 BMC 产品名称
+ * 先试 AMI /api/fru，再试 openUBMC /UI/Rest/Login
+ */
+async function httpProbeDevice(ip, port, timeout = 2000) {
+  // AMI: /api/fru -> 取 device id=0 的 board.product_name / product.product_name
+  const ami = await tryHttpFetch(ip, port, '/api/fru', timeout, (data, statusCode) => {
+    if (statusCode !== 200) return null;
+    try {
+      const json = JSON.parse(data);
+      const dev0 = Array.isArray(json) ? json.find(d => d.device && d.device.id === 0) : null;
+      if (dev0 && dev0.board && dev0.product) {
+        const b = (dev0.board.product_name || '').trim();
+        const p = (dev0.product.product_name || '').trim();
+        if (b || p) return { source: 'AMI', productName: b + (b && p ? '/' : '') + p };
+      }
+    } catch (e) {}
+    return null;
+  });
+  if (ami) return ami;
+
+  // openUBMC: /UI/Rest/Login -> 取 ProductName
+  const ubmc = await tryHttpFetch(ip, port, '/UI/Rest/Login', timeout, (data, statusCode) => {
+    try {
+      const json = JSON.parse(data);
+      if (json.ProductName) return { source: 'openUBMC', productName: json.ProductName };
+    } catch (e) {}
+    return null;
+  });
+  if (ubmc) return ubmc;
+
+  return null;
+}
+
+/**
  * 限制并发的异步执行器
  */
 async function runWithLimit(tasks, limit, onItemDone) {
@@ -264,13 +325,26 @@ async function fullScan(subnet, options = {}) {
         const scanResults = await Promise.all(scans);
         portTargets.forEach((target, i) => { portResults[target.label] = scanResults[i]; });
 
+        // HTTP 产品探测（仅对开放 Web 端口的设备）
+        let productInfo = null;
+        if (portResults['TCP:443'] || portResults['TCP:80']) {
+          const webPort = portResults['TCP:443'] ? 443 : 80;
+          productInfo = await httpProbeDevice(ip, webPort, 1500).catch(() => null);
+        }
+
         const latency = Date.now() - start;
         const anyOpen = Object.values(portResults).some(v => v === true);
         // 过滤：仅 UDP:623 开放，或 UDP:623 + TCP:80 开放的设备不进入验证
         if (anyOpen && !portResults['TCP:623'] && !portResults['TCP:443']) {
           return null;
         }
-        return anyOpen ? { ip, latency, ports: portResults } : null;
+
+        const result = { ip, latency, ports: portResults };
+        if (productInfo) {
+          result.productName = productInfo.productName;
+          result.productSource = productInfo.source;
+        }
+        return anyOpen ? result : null;
       };
     });
 
@@ -282,8 +356,8 @@ async function fullScan(subnet, options = {}) {
       if (onProgress) onProgress({ phase: 'port', current, total, found: foundItems });
     });
 
-    found = scanState.results;
-    console.log(`[SCAN] 端口扫描完成: ${found.length} 台设备有开放端口`, found.map(f => ({ ip: f.ip, ports: f.ports })));
+  found = scanState.results;
+  console.log(`[SCAN] 端口扫描完成: ${found.length} 台设备有开放端口`, found.map(f => ({ ip: f.ip, ports: f.ports, product: f.productName || '-' })));
   }
 
   // 第三步：IPMI 验证（并行验证，只保留验证成功的 BMC 设备）
@@ -437,6 +511,8 @@ module.exports = {
   pingHost,
   scanPort,
   scanTcpPort,
+  tryHttpFetch,
+  httpProbeDevice,
   pingScan,
   portScan,
   fullScan,
