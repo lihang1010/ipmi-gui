@@ -17,10 +17,15 @@
 
 ### 特色功能
 
+- **网络扫描** - 扫描网段自动发现 IPMI 设备（Ping → 端口 → 凭据验证）
+- **多标签 SOL 终端** - 同时打开多个服务器会话
+- **命令收藏夹** - 常用命令一键保存与执行
 - **服务器配置导入/导出** - JSON 格式，方便多台电脑同步
+- **批量删除服务器** - 勾选多台服务器一次删除
 - **日志目录自定义** - 可设置 SOL 日志保存位置
 - **配置记忆** - 自动记住上次保存目录
 - **SOL 日志录制** - 会话内容可保存到文件
+- **内存监控** - 工具栏实时显示应用内存占用
 
 ### 键盘快捷键
 
@@ -246,15 +251,18 @@ ipmitool 需要管理员权限才能运行。右键应用图标 → **以管理�
 ```
 ipmi-gui-electron/
 ├── main.js              # Electron 主进程
-├── preload.js           # 预加载脚本
+├── preload.js           # 预加载脚本（未实际使用）
 ├── package.json         # 项目配置
-├── build.yml           # electron-builder 配置
-├── build.ps1           # 构建脚本
+├── electron-builder.yml # electron-builder 配置
+├── build.ps1            # 构建脚本
 ├── bin/                 # ipmitool 文件（打包时复制）
 ├── src/
 │   ├── index.html       # 主界面
 │   ├── renderer.js      # 渲染进程脚本
-│   └── style.css        # 样式
+│   ├── style.css        # 样式
+│   ├── config/          # 扫描用默认凭据模板
+│   └── modules/         # 业务逻辑模块
+├── __tests__/           # 单元测试（275 用例）
 └── assets/
     └── icon.ico         # 应用图标
 ```
