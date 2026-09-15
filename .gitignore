@@ -5,3 +5,10 @@ coverage/
 *.log
 .DS_Store
 Thumbs.db
+
+# AI 工具产物
+.codex/
+.mimocode/
+.reasonix/
+.workbuddy-ai/
+reasonix.toml
