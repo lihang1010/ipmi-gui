@@ -870,6 +870,7 @@ function renderScanResults(results) {
     const ports = typeof item === 'object' ? item.ports : null;
     const verified = typeof item === 'object' ? item.verified : false;
     const verifyHint = typeof item === 'object' ? item.verifyHint : null;
+    const verifyHintType = typeof item === 'object' ? item.verifyHintType : null;
     const productName = typeof item === 'object' ? item.productName : null;
     const productSource = typeof item === 'object' ? item.productSource : null;
     const exists = existingIPs.includes(ip);
@@ -879,20 +880,25 @@ function renderScanResults(results) {
     if (template) {
       verifyBadge = '<span class="scan-status new" title="IPMI 验证通过，使用 ' + template + ' 凭据">' + template + '</span>';
     } else if (verifyHint) {
-      verifyBadge = '<span class="scan-status warning" title="' + verifyHint + '">凭据错误?</span>';
+      const badgeText = verifyHintType === 'ami' ? 'AMI 凭据错误?' : '凭据错误?';
+      verifyBadge = '<span class="scan-status warning" title="' + verifyHint + '">' + badgeText + '</span>';
     } else {
       verifyBadge = '<span class="scan-status unknown">未验证</span>';
     }
+
+    // 端口徽章 HTML（始终渲染占位 span，保证 grid 列对齐）
+    const portsHtml = ports ? Object.entries(ports).filter(([p, open]) => open).map(([p]) => '<span class="scan-port-badge">' + p + '</span>').join('') : '';
+    const productTitle = productName ? ' title="' + (productSource ? '来源: ' + productSource : '') + '"' : '';
 
     return `
       <div class="scan-result-item ${exists ? 'already-exists' : ''}">
         <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
         <span class="scan-ip">${ip}</span>
         <span class="scan-latency">${latency}ms</span>
-        ${ports ? '<span class="scan-ports">' + Object.entries(ports).filter(([p, open]) => open).map(([p]) => '<span class="scan-port-badge">' + p + '</span>').join('') + '</span>' : ''}
+        <span class="scan-ports">${portsHtml}</span>
         ${verifyBadge}
         <span class="scan-status ${exists ? 'exists' : ''}">${exists ? '已存在' : ''}</span>
-        ${productName ? '<span class="scan-product" title="' + (productSource ? '来源: ' + productSource : '') + '">' + productName + '</span>' : ''}
+        <span class="scan-product"${productTitle}>${productName || ''}</span>
         <div class="scan-actions">
           <button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')" ${exists ? 'disabled' : ''}>添加</button>
         </div>

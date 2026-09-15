@@ -483,14 +483,19 @@ body {
 
 /* --- Scan Results --- */
 .scan-result-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: 20px 140px 70px 150px 115px 55px minmax(100px, 1fr) auto;
   align-items: center;
-  gap: var(--space-md);
+  gap: 8px;
   padding: var(--space-sm) var(--space-md);
   border-radius: var(--radius-md);
   border: 1px solid var(--border-subtle);
   margin-bottom: var(--space-xs);
   transition: background var(--transition-fast);
+}
+
+.scan-checkbox {
+  margin: 0;
 }
 
 .scan-result-item:hover {
@@ -504,7 +509,6 @@ body {
 .scan-ip {
   font-family: var(--font-mono);
   font-weight: 500;
-  min-width: 140px;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -513,24 +517,26 @@ body {
   font-size: 11px;
   color: var(--text-secondary);
   font-family: var(--font-mono);
-  margin-left: 12px;
-  max-width: 200px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   cursor: help;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .scan-latency {
   font-size: 11px;
   color: var(--text-muted);
-  min-width: 80px;
 }
 
 .scan-status {
   font-size: 11px;
   padding: 2px 6px;
   border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   user-select: text;
   -webkit-user-select: text;
 }
@@ -560,12 +566,14 @@ body {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
-  margin-left: 8px;
+  overflow: hidden;
 }
 
 .scan-port-badge {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  min-width: 60px;
   padding: 1px 6px;
   font-size: 10px;
   font-family: var(--font-mono);
@@ -583,7 +591,6 @@ body {
 }
 
 .scan-actions {
-  margin-left: auto;
   display: flex;
   gap: var(--space-xs);
 }

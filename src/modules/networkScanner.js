@@ -384,8 +384,15 @@ async function fullScan(subnet, options = {}) {
         }
 
         // 分析验证失败原因
-        if (!template && device.ports && device.ports['TCP:623']) {
-          device.verifyHint = 'TCP:623 开放但验证失败，可能是非默认凭据的 AMI BMC';
+        if (!template && device.ports) {
+          const allPortsOpen = device.ports['UDP:623'] && device.ports['TCP:623'] && device.ports['TCP:80'] && device.ports['TCP:443'];
+          if (allPortsOpen) {
+            // 完整 BMC 端口特征 (UDP/TCP 623 + 80 + 443)：多为 AMI BMC
+            device.verifyHint = '检测到完整 BMC 端口 (UDP:623/TCP:623/80/443)，验证失败，可能是非默认凭据的 AMI BMC';
+            device.verifyHintType = 'ami';
+          } else if (device.ports['TCP:623']) {
+            device.verifyHint = 'TCP:623 开放但验证失败，可能是非默认凭据的 AMI BMC';
+          }
         }
 
         verifyCurrent++;
