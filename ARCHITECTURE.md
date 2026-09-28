@@ -4,26 +4,28 @@
 
 ```
 ipmi-gui-electron/
-├── main.js                    # Electron 主进程 (307行)
-├── preload.js                 # 预加载脚本 (23行, contextBridge 未实际使用)
+├── main.js                    # Electron 主进程
 ├── package.json               # 项目配置
 ├── electron-builder.yml       # electron-builder 配置
 ├── build.ps1 / build.bat      # 构建脚本
 │
 ├── src/
-│   ├── index.html             # 主界面 HTML (295行)
-│   ├── renderer.js            # 渲染进程脚本 (1056行) ⭐核心
-│   ├── style.css              # 样式文件 (1119行)
+│   ├── index.html             # 主界面 HTML
+│   ├── renderer.js            # 渲染进程脚本 ⭐核心
+│   ├── style.css              # 样式文件
 │   ├── config/
-│   │   └── ipmi-credentials.json  # 扫描验证用默认凭据模板
+│   │   └── ipmi-credentials.json  # 默认凭据唯一来源
 │   └── modules/               # 业务逻辑模块（不生成 HTML）
-│       ├── configStore.js     # 配置读写 (71行)
-│       ├── commandRunner.js   # 命令执行封装 (71行)
-│       ├── favorites.js       # 收藏夹 (241行)
-│       ├── modal.js           # 模态对话框 (80行)
-│       ├── networkScanner.js  # 网络扫描 (574行)
-│       ├── templates.js       # 服务器模板 (71行)
-│       └── utils.js           # 工具函数 (66行)
+│       ├── configStore.js     # 配置读写（唯一实现）
+│       ├── ipmiTool.js        # 路径解析 / 参数构建 / 命令行分词（主+渲染共用）
+│       ├── credentials.js     # 凭据模板读取
+│       ├── commandRunner.js   # 命令执行封装
+│       ├── favorites.js       # 收藏夹
+│       ├── modal.js           # 模态对话框
+│       ├── networkScanner.js  # 网络扫描
+│       ├── scanResultView.js  # 扫描结果行渲染（纯函数）
+│       ├── templates.js       # 服务器模板（凭据来自 credentials.js）
+│       └── utils.js           # 工具函数
 │
 ├── bin/                       # ipmitool 文件 (打包时复制)
 │   ├── ipmitool.exe
@@ -31,7 +33,7 @@ ipmi-gui-electron/
 │   ├── cygcrypto-1.0.0.dll
 │   └── cygz.dll
 │
-├── __tests__/                 # 单元测试 (13 套件, 275 用例)
+├── __tests__/                 # 单元测试 (16 套件)
 ├── assets/
 │   └── icon.ico               # 应用图标
 └── dist/                      # 构建产物 (win-unpacked + 安装包)
@@ -47,14 +49,13 @@ ipmi-gui-electron/
 │                           (main.js)                             │
 ├─────────────────────────────────────────────────────────────────┤
 │  • 窗口管理 (BrowserWindow)                                      │
-│  • 配置文件读写 (config.json)                                     │
 │  • ipmitool 命令执行 (child_process)                             │
 │  • SOL 终端管理 (node-pty, 多标签)                                │
 │  • 文件对话框 (dialog)                                           │
 │  • IPC 通信处理                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                        IPC 通道                                  │
-│  config:get/save, ipmi:execute, sol:start/stop/write/deactivate │
+│  ipmi:execute, sol:start/stop/close/write, sol:data/exit        │
 │  file:save, dialog:selectDirectory/File, app:getMemory          │
 ├─────────────────────────────────────────────────────────────────┤
 │                      渲染进程 (renderer.js)                      │
@@ -63,12 +64,14 @@ ipmi-gui-electron/
 │  • 服务器管理 (CRUD/批量删除)                                    │
 │  • SOL 多标签终端 (xterm.js)                                     │
 │  • 网络扫描 UI                                                   │
+│  • 配置读写 (configStore.js)                                     │
 │  • 内存监控                                                      │
 │  • 键盘快捷键                                                    │
 ├─────────────────────────────────────────────────────────────────┤
 │                   业务逻辑模块 (src/modules/)                     │
-│  configStore / commandRunner / favorites / modal /               │
-│  networkScanner / templates / utils                              │
+│  configStore / ipmiTool / credentials / commandRunner /          │
+│  favorites / modal / networkScanner / scanResultView /           │
+│  templates / utils                                               │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -80,17 +83,16 @@ ipmi-gui-electron/
 
 | 函数 | 职责 | 行数 |
 |------|------|------|
-| `loadConfig()` | 加载配置文件 | 10 |
-| `saveConfig()` | 保存配置文件 | 8 |
-| `createWindow()` | 创建主窗口 | 18 |
-| `buildArgs()` | 构建 ipmitool 参数 | 12 |
-| `getIpmiToolPath()` | 查找 ipmitool 路径 (5 级) | 20 |
-| IPC: `config:get/save` | 配置读写（⚠️ 渲染进程未调用，死代码） | 10 |
-| IPC: `ipmi:execute` | 执行 IPMI 命令 | 20 |
-| IPC: `sol:start/stop/write/deactivate` | SOL 管理（多标签） | 90 |
+| `createWindow()` | 创建主窗口 | 15 |
+| `getIpmiToolPath()` | 委托 `ipmiTool.resolveIpmiToolPath()`，缺失返回 null | 3 |
+| `deactivateSolSession()` | 执行 sol deactivate（sol:stop / sol:close 复用） | 26 |
+| IPC: `ipmi:execute` | 执行 IPMI 命令（参数经 tokenizeCommand 分词） | 30 |
+| IPC: `sol:start/stop/close/write` | SOL 管理（多标签 + PTY 回收） | 55 |
 | IPC: `app:getMemory` | 返回进程内存占用 | 9 |
 | IPC: `file:save` | 文件保存对话框 | 15 |
 | IPC: `dialog:select*` | 目录/文件选择 | 20 |
+
+**说明**: 主进程不读写配置（统一由渲染进程 `configStore.js` 负责）。
 
 **依赖**: electron, node-pty, fs, path, child_process
 
@@ -113,13 +115,16 @@ ipmi-gui-electron/
 
 | 文件 | 职责 | 测试覆盖 |
 |------|------|----------|
-| `configStore.js` | 配置读写 (fs 直接操作 %APPDATA%) | 100% |
-| `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | 100% |
-| `favorites.js` | 收藏夹 CRUD/执行/排序 | 86.55% |
-| `modal.js` | 自定义 alert/confirm 弹窗 | 67.74% |
-| `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证 | 84.74% |
-| `templates.js` | 服务器模板填充 | 11.53% |
-| `utils.js` | escapeHtml/showStatus/clearOutput/isValidIP | 41.66% |
+| `configStore.js` | 配置读写 (fs 直接操作 %APPDATA%，唯一实现) | 见 test_report.md |
+| `ipmiTool.js` | 路径解析 / 参数构建 / 命令行分词 | 新增 |
+| `credentials.js` | 凭据模板读取（ipmi-credentials.json 唯一入口） | 新增 |
+| `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | 见 test_report.md |
+| `favorites.js` | 收藏夹 CRUD/执行/排序 | 见 test_report.md |
+| `modal.js` | 自定义 alert/confirm 弹窗 | 见 test_report.md |
+| `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证/CIDR 展开 | 见 test_report.md |
+| `scanResultView.js` | 扫描结果行渲染（转义 + 事件委托） | 新增 |
+| `templates.js` | 服务器模板填充 | 见 test_report.md |
+| `utils.js` | escapeHtml/showStatus/clearOutput/isValidIP | 见 test_report.md |
 
 ### 3.4 样式 (style.css)
 
@@ -156,9 +161,8 @@ ipmi-gui-electron/
     └── saveConfig() ← 修改后写回
 ```
 
-> ⚠️ main.js 也有一套 loadConfig/saveConfig（走 app.getPath('userData')，路径相同），
-> 但渲染进程只通过 configStore.js 读写，`config:get`/`config:save` IPC 从未被调用。
-> 新增配置字段需同步两边默认结构。
+> 配置只有一处实现：渲染进程 `src/modules/configStore.js`。
+> 主进程不再读写配置，也不提供 config 相关 IPC。
 
 ### 4.2 命令执行流程
 
@@ -171,9 +175,10 @@ ipmi-gui-electron/
     │
     └── main.js: ipcMain.handle('ipmi:execute')
             │
-            ├── buildArgs(server)     构建参数
-            ├── getIpmiToolPath()     获取路径
-            └── child_process.spawn() 执行命令
+            ├── resolveIpmiToolPath()  获取路径（缺失则返回明确错误）
+            ├── buildArgs(server)      构建连接参数
+            ├── tokenizeCommand(cmd)   分词（支持引号）
+            └── child_process.spawn()  执行命令
                     │
                     └── 返回 { code, stdout, stderr }
 ```
@@ -204,17 +209,19 @@ ipmi-gui-electron/
 ```
 用户点击"开始扫描"
     │
-    └── networkScanner.js: fullScan(subnet)
+    ├── renderer.js: cidrToHosts(network, cidr) → 主机列表 (/24~/30)
+    │
+    └── networkScanner.js: fullScan(network, { hosts })
             │
-            ├── 第一步: Ping 扫描 (并发 50, 254 个 IP)
-            │       └── pingHost() → 在线 IP 列表
+            ├── 第一步: Ping 扫描 (并发 50)
+            │       └── pingHost() → 在线 IP 列表 (Windows -w 为毫秒)
             ├── 第二步: 端口扫描 (并发 20)
-            │       └── UDP:623 + TCP:623/80/443 → HTTP 产品探测
+            │       └── UDP:623 (ASF Presence Ping) + TCP:623/80/443 → HTTP 产品探测
             │       └── 过滤: 无 TCP:623 且无 TCP:443 → 丢弃
             ├── 第三步: IPMI 验证 (并发 5)
-            │       └── verifyIPMITemplate() 尝试 3 组默认凭据
+            │       └── verifyIPMITemplate() 逐条尝试 credentials.js 提供的凭据
             │       └── 通过 → 标记 template + verified
-            └── 返回结果 → renderScanResults()
+            └── 返回结果 → renderScanResults() → scanResultView.js 渲染行
 ```
 
 ---
@@ -223,12 +230,10 @@ ipmi-gui-electron/
 
 | 通道 | 方向 | 参数 | 返回 |
 |------|------|------|------|
-| `config:get` | 渲染→主 | - | config（⚠️ 未使用） |
-| `config:save` | 渲染→主 | config | true（⚠️ 未使用） |
 | `ipmi:execute` | 渲染→主 | server, command, args | {code, stdout, stderr} |
 | `sol:start` | 渲染→主 | server, tabId | {success, pid/error} |
 | `sol:stop` | 渲染→主 | server | {success, stderr} |
-| `sol:deactivate` | 渲染→主 | server | {success, stderr}（⚠️ 与 sol:stop 重复） |
+| `sol:close` | 渲染→主 | tabId, server | {success, stderr/warning} |
 | `sol:write` | 渲染→主 | tabId, data | - |
 | `sol:data` | 主→渲染 | {tabId, data} | - |
 | `sol:exit` | 主→渲染 | {tabId, exitCode} | - |
@@ -236,6 +241,8 @@ ipmi-gui-electron/
 | `dialog:selectDirectory` | 渲染→主 | - | path/null |
 | `dialog:selectFile` | 渲染→主 | filters | path/null |
 | `app:getMemory` | 渲染→主 | - | {rss, heapUsed, heapTotal, external} |
+
+> `sol:stop` 释放远端会话；`sol:close` 额外回收本地 PTY（关闭标签时使用）。
 
 ---
 
@@ -298,19 +305,18 @@ ipmi-gui-electron/
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| main.js | 307 | 主进程 |
-| renderer.js | 1056 | 渲染进程 (核心) |
-| index.html | 295 | 界面结构 |
-| style.css | 1119 | 样式 |
-| preload.js | 23 | 预加载 (未使用) |
-| src/modules/*.js (7 个) | 1174 | 业务逻辑模块 |
-| **总计** | **3974** | |
+| main.js | 258 | 主进程 |
+| renderer.js | 1041 | 渲染进程 (核心) |
+| index.html | 296 | 界面结构 |
+| style.css | 1127 | 样式 |
+| src/modules/*.js (10 个) | 1522 | 业务逻辑模块 |
+| **总计** | **4244** | |
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 13 个 *.test.js | 275 |
+| 16 个 *.test.js | 323 |
 
-覆盖率详见 `test_report.md`：语句 77.83% / 行 81.07%（Jest 30）。
+覆盖率详见 `test_report.md`（Jest 30）。
 
 ---
 
@@ -318,17 +324,26 @@ ipmi-gui-electron/
 
 | 问题 | 说明 | 优先级 |
 |------|------|--------|
-| renderer.js 仍然较大 | 1056 行，已部分拆分到 modules/，可继续拆 | 中 |
-| 配置读写双重逻辑 | main.js 与 configStore.js 各有读写，config IPC 是死代码 | 中 |
-| sol:stop / sol:deactivate 重复 | 两个 IPC handler 功能完全相同 | 低 |
+| renderer.js 仍然较大 | 1041 行，已部分拆分到 modules/，可继续拆 | 中 |
 | 无 TypeScript | 类型安全缺失 | 中 |
-| 密码明文存储 | 配置文件中密码未加密 | 高 |
-| 原始命令参数拼接 | ipmi:execute 用 command.split(' ') 拼参，含引号/空格无法传递 | 中 |
-| Jest 30 弃用警告 | getElementById soft-deleted 警告，未来版本会 hard fail | 中 |
-| 凭据模板多处重复 | templates.js / ipmi-credentials.json / 两处 fallback 数组 | 低 |
-| 无错误边界 | 未捕获的异常可能导致崩溃 | 低 |
+| 密码明文存储 | 配置文件中密码未加密（可考虑 safeStorage） | 高 |
+| 扫描仍在渲染进程 | child_process/dgram/net 在渲染层执行，应移入主进程 | 中 |
+| 渲染层仍用 nodeIntegration | contextIsolation 关闭 + CSP 含 unsafe-inline/eval | 高 |
+| verifyIPMI 用 exec 拼字符串 | 凭据含引号/特殊字符会破坏命令，建议 execFile | 中 |
+| 无 ESLint / 无错误边界 | 未捕获异常可能导致崩溃 | 低 |
+
+### 已修复（v1.2）
+
+- 扫描结果未转义 → `scanResultView.js` 统一转义 + 事件委托（原 XSS/RCE 通道）
+- SOL 标签关闭后 PTY 泄漏 → 新增 `sol:close`
+- `sol:stop` 与 `sol:deactivate` 重复 → 合并为 `deactivateSolSession`
+- 配置读写双重逻辑 + `config:*` 死 IPC → 统一由 `configStore.js` 负责
+- 凭据模板 5 处重复 → `credentials.js` 单一来源
+- `ipmi:execute` 用 `split(' ')` 拼参 → `tokenizeCommand` 支持引号
+- 打包后扫描器找不到 ipmitool → 统一 `resolveIpmiToolPath()`
+- 扫描 CIDR 输入无效、Windows ping 超时恒为 1 秒、UDP 探测误判为开放
 
 ---
 
-*文档版本: v1.1*
-*更新时间: 2026-07-21*
+*文档版本: v1.2*
+*更新时间: 2026-09-28*

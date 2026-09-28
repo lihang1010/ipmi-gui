@@ -23,7 +23,6 @@
 ```
 ipmi-gui-electron/
 ├── main.js                  # Electron 主进程
-├── preload.js               # 预加载脚本 (未实际使用)
 ├── package.json
 ├── electron-builder.yml     # 打包配置
 ├── build.ps1 / build.bat    # 构建脚本
@@ -34,17 +33,20 @@ ipmi-gui-electron/
 │   ├── index.html           # 主界面
 │   ├── renderer.js          # 渲染进程核心
 │   ├── style.css            # 暗色主题样式系统
-│   ├── config/ipmi-credentials.json
+│   ├── config/ipmi-credentials.json  # 默认凭据唯一来源
 │   └── modules/
-│       ├── configStore.js   # 配置读写
+│       ├── configStore.js   # 配置读写 (唯一实现)
+│       ├── ipmiTool.js      # 路径解析/参数构建/命令行分词 (主+渲染共用)
+│       ├── credentials.js   # 凭据模板读取
 │       ├── commandRunner.js # IPMI 命令执行封装
 │       ├── favorites.js     # 收藏夹
 │       ├── utils.js         # 工具函数
 │       ├── modal.js         # 模态对话框
-│       ├── templates.js     # 服务器模板
+│       ├── templates.js     # 服务器模板 (凭据来自 credentials.js)
+│       ├── scanResultView.js# 扫描结果行渲染 (纯函数)
 │       └── networkScanner.js# 网络扫描
-├── __tests__/               # 单元测试 (275 用例)
-└── coverage/                # 覆盖率报告
+├── __tests__/               # 单元测试 (16 套件)
+└── coverage/                # 覆盖率报告 (已被 .gitignore 忽略)
 ```
 
 ---
@@ -59,26 +61,27 @@ webPreferences: {
   nodeIntegration: true,    // 渲染进程可 require
   contextIsolation: false   // 无隔离层
 }
-// preload.js 的 contextBridge API 未使用，renderer 直接走 ipcRenderer
+// 无 preload 脚本：渲染进程直接 require('electron') 使用 ipcRenderer
 ```
 
 ### IPC 通道
 
 | 通道 | 方向 | 参数 | 返回 |
 |------|------|------|------|
-| config:get | 渲染→主 | - | config 对象 |
-| config:save | 渲染→主 | config | true |
-| ipmi:execute | 渲染→主 | server, command | {code, stdout, stderr} |
+| ipmi:execute | 渲染→主 | server, command, args | {code, stdout, stderr} |
 | sol:start | 渲染→主 | server, tabId | {success, pid/error} |
 | sol:stop | 渲染→主 | server | {success, stderr} |
+| sol:close | 渲染→主 | tabId, server | {success, stderr} |
 | sol:write | 渲染→主 | tabId, data | - |
-| sol:deactivate | 渲染→主 | server | {success, stderr} |
 | sol:data | 主→渲染 | {tabId, data} | - |
 | sol:exit | 主→渲染 | {tabId, exitCode} | - |
 | file:save | 渲染→主 | defaultName, content | {success, path} |
 | dialog:selectDirectory | 渲染→主 | - | path/null |
 | dialog:selectFile | 渲染→主 | filters | path/null |
 | app:getMemory | 渲染→主 | - | {rss, heapUsed, ...} |
+
+> 配置不走 IPC：渲染进程的 `src/modules/configStore.js` 直接读写
+> `%APPDATA%/ipmi-gui/config.json`。
 
 **新增 IPC**：main.js 加 ipcMain.handle，renderer 调用 ipcRenderer.invoke。
 
@@ -113,33 +116,40 @@ webPreferences: {
 
 ## 关键实现
 
-### ipmitool 参数构建 (main.js buildArgs)
+### ipmitool 参数构建 (src/modules/ipmiTool.js buildArgs)
 
 拼装 -H/-U/-P/-I/-C/-L 参数，SOL 额外拼 sol activate。
+命令行参数用 `tokenizeCommand()` 分词（支持引号），不要用 `split(' ')`。
 
-### ipmitool 路径查找 (5级)
+### ipmitool 路径查找 (src/modules/ipmiTool.js resolveIpmiToolPath)
 
-1. resources/bin/ipmitool.exe
-2. resources/app.asar.unpacked/bin/ipmitool.exe
-3. exe 同级 bin/
-4. exe 同目录
+1. process.resourcesPath/bin/ipmitool.exe
+2. process.resourcesPath/app.asar.unpacked/bin/ipmitool.exe
+3. exe 同级 resources/bin、resources/app.asar.unpacked/bin
+4. exe 同级 bin/、exe 同目录
 5. 开发模式: 项目 bin/
+
+未找到时返回 `null`，调用方负责给出明确错误，不要返回不存在的路径。
 
 ### 配置存储
 
 路径: %APPDATA%/ipmi-gui/config.json
+唯一实现是渲染进程的 `src/modules/configStore.js`（主进程不再读写配置）。
 密码明文存储，无加密。
 
 ### 网络扫描流程
 
 ```
-Ping 扫描 -> 多端口扫描 (UDP:623 TCP:623 TCP:80 TCP:443)
+CIDR 展开主机 (cidrToHosts, /24~/30)
    |
-   +-- 无 TCP:623 且无 TCP:443 -> 丢弃 (不验证)
-   +-- 有 TCP:623 或 TCP:443 -> IPMI 验证
+   +-- Ping 扫描 (Windows -w 为毫秒)
+   +-- 多端口扫描 (UDP:623 ASF Ping / TCP:623 / TCP:80 / TCP:443)
          |
-         +-- 通过: 标记 verified + template 名
-         +-- 失败: TCP:623 开放时标记 verifyHint 提示
+         +-- 无 TCP:623 且无 TCP:443 -> 丢弃 (不验证)
+         +-- 有 TCP:623 或 TCP:443 -> IPMI 验证 (凭据来自 credentials.js)
+               |
+               +-- 通过: 标记 verified + template 名
+               +-- 失败: TCP:623 开放时标记 verifyHint 提示
 ```
 
 ---
@@ -151,11 +161,11 @@ npm test                  # 全量
 npx jest __tests__/xxx    # 单文件
 ```
 
-- Jest 30 + jsdom
+- Jest 30，testEnvironment 为 **node**（非 jsdom，DOM 靠手工 mock）
 - Node 内置模块用 jest.mock() 行内 mock
 - dgram、net、child_process、fs、path、os 均已 mock
 - fullScan 测试设 30s 超时
-- 共 275 用例，13 套件
+- 共 323 用例，16 套件
 
 ---
 
@@ -174,11 +184,14 @@ powershell build.ps1 # 构建
 
 ## 常见陷阱
 
-### 1. 配置读写双重逻辑
-main.js 和 configStore.js 都有独立的配置读写，新增字段需两边同步。
+### 1. 反射到 DOM 的数据必须转义
+扫描结果里的 productName / productSource 来自被扫描设备的 HTTP 响应，
+属远端可控数据；渲染前必须经 `escapeHtml`（见 scanResultView.js），
+否则在 nodeIntegration 开启下可升级为 RCE。
 
-### 2. IPC Handler 重复
-sol:stop 和 sol:deactivate 功能完全相同。
+### 2. 凭据只在 ipmi-credentials.json 维护
+运行时一律走 `src/modules/credentials.js`（getCredentialTemplates /
+getCredentialByName / getServerTemplates），不要在模块里内联凭据副本。
 
 ### 3. 中文编码
 PowerShell 输出中文异常，apply_patch context 匹配优先用非中文行。

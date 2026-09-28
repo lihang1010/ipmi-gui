@@ -251,7 +251,6 @@ ipmitool 需要管理员权限才能运行。右键应用图标 → **以管理�
 ```
 ipmi-gui-electron/
 ├── main.js              # Electron 主进程
-├── preload.js           # 预加载脚本（未实际使用）
 ├── package.json         # 项目配置
 ├── electron-builder.yml # electron-builder 配置
 ├── build.ps1            # 构建脚本
@@ -260,9 +259,9 @@ ipmi-gui-electron/
 │   ├── index.html       # 主界面
 │   ├── renderer.js      # 渲染进程脚本
 │   ├── style.css        # 样式
-│   ├── config/          # 扫描用默认凭据模板
+│   ├── config/          # 默认凭据模板（唯一来源）
 │   └── modules/         # 业务逻辑模块
-├── __tests__/           # 单元测试（275 用例）
+├── __tests__/           # 单元测试（16 套件）
 └── assets/
     └── icon.ico         # 应用图标
 ```
