@@ -519,6 +519,28 @@ body {
   margin: 0 var(--space-xs);
 }
 
+/* 工具栏内的勾选项（如扫描的 Ping 预探测） */
+.panel-toolbar .checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.panel-toolbar .checkbox-label input {
+  margin: 0;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.panel-toolbar .checkbox-label input:disabled {
+  cursor: default;
+}
+
 /* --- Scan Results --- */
 .scan-result-item {
   display: grid;

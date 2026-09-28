@@ -143,7 +143,8 @@ webPreferences: {
 ```
 CIDR 展开主机 (cidrToHosts, /24~/30)
    |
-   +-- Ping 扫描 (Windows -w 为毫秒)
+   +-- Ping 扫描 (可关闭：usePing=false 时跳过，直接对全部地址扫端口;
+   |               Windows 的 -w 单位为毫秒)
    +-- 多端口扫描 (UDP:623 ASF Ping / TCP:623 / TCP:80 / TCP:443)
          |
          +-- 无 TCP:623 且无 TCP:443 -> 丢弃 (不验证)

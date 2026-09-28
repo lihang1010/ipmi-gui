@@ -296,7 +296,10 @@ async function portScan(ips, options = {}) {
 }
 
 /**
- * 完整扫描流程：Ping → 端口扫描
+ * 完整扫描流程：Ping（可选）→ 端口扫描 → IPMI 验证
+ * @param {object} options
+ *   usePing=false 时跳过 Ping，直接对全部目标地址做端口扫描
+ *   （可发现禁 Ping 设备，但探测次数更多、更慢）
  */
 async function fullScan(subnet, options = {}) {
   const {
@@ -305,6 +308,7 @@ async function fullScan(subnet, options = {}) {
     portConcurrency = 10,
     portTimeout = 300,
     hosts = null,
+    usePing = true,
     onProgress
   } = options;
 
@@ -312,20 +316,32 @@ async function fullScan(subnet, options = {}) {
 
   scanState = { running: true, stopped: false, results: [], current: 0, total: targetHosts.length, phase: 'ping' };
 
-  // 第一步：Ping 扫描
-  if (onProgress) onProgress({ phase: 'ping', current: 0, total: targetHosts.length, found: [] });
+  let alive = [];
 
-  const alive = await pingScan(targetHosts, {
-    concurrency: pingConcurrency,
-    timeout: pingTimeout,
-    onProgress: (current, total, found) => {
-      if (onProgress) onProgress({ phase: 'ping', current, total, found });
-    }
-  });
+  if (usePing) {
+    // 第一步：Ping 扫描
+    if (onProgress) onProgress({ phase: 'ping', current: 0, total: targetHosts.length, found: [] });
 
-  console.log(`[SCAN] Ping 完成: ${alive.length} 台设备在线`);
+    alive = await pingScan(targetHosts, {
+      concurrency: pingConcurrency,
+      timeout: pingTimeout,
+      onProgress: (current, total, found) => {
+        if (onProgress) onProgress({ phase: 'ping', current, total, found });
+      }
+    });
 
-  if (scanState.stopped) return scanState.results;
+    console.log(`[SCAN] Ping 完成: ${alive.length} 台设备在线`);
+
+    if (scanState.stopped) return scanState.results;
+  } else {
+    // 跳过 Ping：所有目标地址直接进入端口扫描
+    alive = targetHosts.map(ip => ({ ip, latency: 0 }));
+    scanState.total = alive.length;
+    scanState.phase = 'port';
+    console.log(`[SCAN] 跳过 Ping，直接对 ${alive.length} 个地址做端口扫描`);
+
+    if (onProgress) onProgress({ phase: 'port', current: 0, total: alive.length, found: [] });
+  }
 
   // 第二步：端口扫描
   let found = [];

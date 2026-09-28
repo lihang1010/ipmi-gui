@@ -246,7 +246,7 @@ ipcMain.handle('scan:getLocalNetwork', () => getLocalNetwork());
 
 // 开始扫描，进度通过 scan:progress 推送
 ipcMain.handle('scan:start', async (event, options = {}) => {
-  const { network, cidr = 24, timeout = 200 } = options || {};
+  const { network, cidr = 24, timeout = 200, usePing = true } = options || {};
   if (!network) {
     return { success: false, error: '缺少网段参数' };
   }
@@ -254,6 +254,7 @@ ipcMain.handle('scan:start', async (event, options = {}) => {
   try {
     const results = await fullScan(network, {
       hosts: cidrToHosts(network, cidr),
+      usePing: usePing !== false,
       pingConcurrency: 50,
       pingTimeout: timeout,
       portConcurrency: 20,

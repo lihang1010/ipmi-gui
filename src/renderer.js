@@ -777,6 +777,8 @@ let scanResults = [];
 // 扫描列表重绘限流状态
 let lastScanRenderAt = 0;
 let lastScanRenderPhase = '';
+// 本次扫描是否启用 Ping 预探测（用于进度文案）
+let lastScanUsePing = true;
 
 async function initScan() {
   // 自动填充本机网段（由主进程读取网卡信息）
@@ -833,8 +835,11 @@ async function startScan() {
   const subnet = document.getElementById('scan-subnet').value.trim();
   const cidr = parseInt(document.getElementById('scan-cidr').value) || 24;
   const timeout = parseInt(document.getElementById('scan-timeout').value) || 200;
+  // 默认勾选：先 Ping 探测存活再扫端口；不勾选则直接对全部地址扫端口
+  const usePing = document.getElementById('scan-use-ping').checked;
 
-  if (!subnet || !subnet.match(/^\d+\.\d+\.\d+$/)) {
+  // 兼容三段式 (192.168.1) 与四段式 (192.168.1.0)，后者取前三段作为网段
+  if (!subnet || !subnet.match(/^\d+\.\d+\.\d+(\.\d+)?$/)) {
     safeAlert('请输入有效的网段，如 192.168.1.0');
     return;
   }
@@ -848,14 +853,16 @@ async function startScan() {
   // 更新UI状态
   document.getElementById('btn-scan-start').disabled = true;
   document.getElementById('btn-scan-stop').disabled = false;
+  document.getElementById('scan-use-ping').disabled = true;
   document.getElementById('scan-results').innerHTML = '';
   scanResults = [];
   lastScanRenderAt = 0;
   lastScanRenderPhase = '';
+  lastScanUsePing = usePing;
 
   try {
     // CIDR 展开与扫描均在主进程执行，进度经 scan:progress 推送
-    const result = await ipcRenderer.invoke('scan:start', { network, cidr, timeout });
+    const result = await ipcRenderer.invoke('scan:start', { network, cidr, timeout, usePing });
     if (!result.success) {
       await safeAlert('扫描失败: ' + result.error);
       return;
@@ -870,6 +877,7 @@ async function startScan() {
   } finally {
     document.getElementById('btn-scan-start').disabled = false;
     document.getElementById('btn-scan-stop').disabled = true;
+    document.getElementById('scan-use-ping').disabled = false;
   }
 }
 
@@ -877,6 +885,7 @@ function stopScan() {
   ipcRenderer.invoke('scan:stop').catch(() => {});
   document.getElementById('btn-scan-start').disabled = false;
   document.getElementById('btn-scan-stop').disabled = true;
+  document.getElementById('scan-use-ping').disabled = false;
   document.getElementById('scan-phase').textContent = '已停止';
 }
 
@@ -884,7 +893,11 @@ function updateScanProgress(info) {
   const { phase, current, total, found } = info;
   const percent = Math.round((current / total) * 100);
 
-  const phaseText = phase === 'ping' ? 'Ping 扫描中...' : phase === 'port' ? '端口扫描中...' : 'IPMI 验证中...';
+  const phaseText = phase === 'ping'
+    ? 'Ping 扫描中...'
+    : phase === 'port'
+      ? (lastScanUsePing ? '端口扫描中...' : '端口扫描中（未做 Ping 预探测）...')
+      : 'IPMI 验证中...';
   document.getElementById('scan-phase').textContent = phaseText;
   document.getElementById('scan-progress-bar').style.width = percent + '%';
   document.getElementById('scan-progress-text').textContent = `${current}/${total}`;

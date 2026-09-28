@@ -420,6 +420,44 @@ describe('NetworkScanner Module', () => {
       expect(result[0].bmcVersion).toBe('1.11.1109');
     }, 30000);
 
+    test('usePing=false 时应跳过 Ping，直接扫端口', async () => {
+      const { exec } = require('child_process');
+      const phases = [];
+
+      const result = await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1'],
+        usePing: false,
+        pingConcurrency: 1,
+        pingTimeout: 50,
+        portConcurrency: 1,
+        portTimeout: 50,
+        onProgress: (info) => phases.push(info.phase)
+      });
+
+      expect(exec.mock.calls.some(call => String(call[0]).includes('ping'))).toBe(false);
+      expect(phases).not.toContain('ping');
+      expect(phases[0]).toBe('port');
+      expect(result).toHaveLength(1);
+      expect(result[0].ip).toBe('192.168.1.1');
+    }, 30000);
+
+    test('默认应执行 Ping 预探测', async () => {
+      const { exec } = require('child_process');
+      const phases = [];
+
+      await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1'],
+        pingConcurrency: 1,
+        pingTimeout: 50,
+        portConcurrency: 1,
+        portTimeout: 50,
+        onProgress: (info) => phases.push(info.phase)
+      });
+
+      expect(exec.mock.calls.some(call => String(call[0]).includes('ping'))).toBe(true);
+      expect(phases[0]).toBe('ping');
+    }, 30000);
+
     test('验证时应传入凭据模板的用户名与密码（回归：曾误传字符串导致全部验证失败）', async () => {
       await scanner.fullScan('192.168.1', {
         hosts: ['192.168.1.1'],

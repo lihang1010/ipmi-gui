@@ -542,14 +542,45 @@ describe('Renderer Module', () => {
       });
 
       const result = await ipcRenderer.invoke('scan:start', {
-        network: '192.168.1', cidr: 24, timeout: 200
+        network: '192.168.1', cidr: 24, timeout: 200, usePing: true
       });
 
       expect(ipcRenderer.invoke).toHaveBeenCalledWith('scan:start', {
-        network: '192.168.1', cidr: 24, timeout: 200
+        network: '192.168.1', cidr: 24, timeout: 200, usePing: true
       });
       expect(result.success).toBe(true);
       expect(result.results).toHaveLength(1);
+    });
+
+    test('startScan 应把 Ping 勾选状态传给主进程', async () => {
+      // 前面的用例替换过 document.getElementById，这里恢复带缓存的实现，
+      // 否则下面设置的表单值在 startScan 里读不到
+      document.getElementById = jest.fn((id) => {
+        if (!mockDomElements[id]) mockDomElements[id] = createMockElement(id);
+        return mockDomElements[id];
+      });
+
+      domReadyHandlers.forEach(handler => handler());   // 触发 bindEvents / initScan
+      // initScan 内部先 await 取本机网段，再绑定扫描按钮，需等它完成
+      await new Promise(resolve => setImmediate(resolve));
+
+      document.getElementById('scan-subnet').value = '192.168.1.0';
+      document.getElementById('scan-cidr').value = '24';
+      document.getElementById('scan-timeout').value = '200';
+      document.getElementById('scan-use-ping').checked = false;
+
+      const clicks = document.getElementById('btn-scan-start').addEventListener.mock.calls
+        .filter(call => call[0] === 'click');
+      expect(clicks.length).toBeGreaterThan(0);
+
+      ipcRenderer.invoke.mockResolvedValueOnce({ success: true, results: [] });
+      await clicks[clicks.length - 1][1]();
+
+      expect(safeAlert).not.toHaveBeenCalled();
+
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('scan:start', {
+        network: '192.168.1', cidr: 24, timeout: 200, usePing: false
+      });
     });
 
     test('should stop scan via scan:stop', async () => {
