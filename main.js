@@ -246,6 +246,39 @@ ipcMain.handle('sol:deactivate', async (event, server) => {
   });
 });
 
+// 关闭 SOL 标签：强制结束本地 PTY，再 deactivate 远端会话
+ipcMain.handle('sol:close', async (event, tabId, server) => {
+  const proc = ptyProcesses[tabId];
+  if (proc) {
+    try { proc.kill(); } catch (e) {}
+    delete ptyProcesses[tabId];
+  }
+
+  // 没有服务器信息时只做本地清理
+  if (!server) return { success: true };
+
+  const ipmitoolPath = getIpmiToolPath();
+  const args = [...buildArgs(server), 'sol', 'deactivate'];
+
+  return new Promise((resolve) => {
+    const spawn = require('child_process').spawn;
+    const deactivateProc = spawn(ipmitoolPath, args, {
+      windowsHide: true
+    });
+
+    let stderr = '';
+    deactivateProc.stderr.on('data', (data) => { stderr += data; });
+
+    deactivateProc.on('close', (code) => {
+      resolve({ success: code === 0, stderr });
+    });
+
+    deactivateProc.on('error', (err) => {
+      resolve({ success: false, error: err.message });
+    });
+  });
+});
+
 // ========== 文件操作 ==========
 
 // 保存文件

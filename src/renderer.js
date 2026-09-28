@@ -15,6 +15,7 @@ const { SERVER_TEMPLATES, applyTemplate, updateServerNameFromTemplate } = requir
 const { executeCommand, executePower, executeSensor, executeRawCommand } = require('./modules/commandRunner');
 const favorites = require('./modules/favorites');
 const scanner = require('./modules/networkScanner');
+const { renderScanResultRow } = require('./modules/scanResultView');
 
 // ========== 全局状态 ==========
 let _currentServer = null;
@@ -185,10 +186,8 @@ function closeSolTab(tabId) {
 
   const tab = solTabs[tabIndex];
 
-  // 如果正在运行，先停止
-  if (tab.isRunning && tab.ptyPid) {
-    ipcRenderer.invoke('sol:stop', tab.server);
-  }
+  // 释放主进程中的 PTY 并 deactivate 会话，避免关闭标签后进程泄漏
+  ipcRenderer.invoke('sol:close', tab.id, tab.server || null).catch(() => {});
 
   // 销毁终端
   tab.terminal.dispose();
@@ -860,53 +859,45 @@ function renderScanResults(results) {
 
   if (results.length === 0) {
     container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:40px;">未发现设备</div>';
+    bindScanResultEvents();
     return;
   }
 
-  container.innerHTML = results.map(item => {
-    const ip = typeof item === 'string' ? item : item.ip;
-    const latency = typeof item === 'object' ? item.latency : 0;
-    const template = typeof item === 'object' ? item.template : null;
-    const ports = typeof item === 'object' ? item.ports : null;
-    const verified = typeof item === 'object' ? item.verified : false;
-    const verifyHint = typeof item === 'object' ? item.verifyHint : null;
-    const verifyHintType = typeof item === 'object' ? item.verifyHintType : null;
-    const productName = typeof item === 'object' ? item.productName : null;
-    const productSource = typeof item === 'object' ? item.productSource : null;
-    const exists = existingIPs.includes(ip);
+  // 保留用户已勾选状态，避免进度刷新重绘时丢失
+  const checkedIPs = [...container.querySelectorAll('.scan-checkbox:checked')].map(cb => cb.value);
 
-    // 构建验证状态标签
-    let verifyBadge = '';
-    if (template) {
-      verifyBadge = '<span class="scan-status new" title="IPMI 验证通过，使用 ' + template + ' 凭据">' + template + '</span>';
-    } else if (verifyHint) {
-      const badgeText = verifyHintType === 'ami' ? 'AMI 凭据错误?' : '凭据错误?';
-      verifyBadge = '<span class="scan-status warning" title="' + verifyHint + '">' + badgeText + '</span>';
-    } else {
-      verifyBadge = '<span class="scan-status unknown">未验证</span>';
-    }
+  container.innerHTML = results
+    .map(item => renderScanResultRow(item, { existingIPs, checkedIPs }))
+    .join('');
 
-    // 端口徽章 HTML（始终渲染占位 span，保证 grid 列对齐）
-    const portsHtml = ports ? Object.entries(ports).filter(([p, open]) => open).map(([p]) => '<span class="scan-port-badge">' + p + '</span>').join('') : '';
-    const productTitle = productName ? ' title="' + (productSource ? '来源: ' + productSource : '') + '"' : '';
-
-    return `
-      <div class="scan-result-item ${exists ? 'already-exists' : ''}">
-        <input type="checkbox" class="scan-checkbox" value="${ip}" ${exists ? 'disabled' : ''}>
-        <span class="scan-ip">${ip}</span>
-        <span class="scan-latency">${latency}ms</span>
-        <span class="scan-ports">${portsHtml}</span>
-        ${verifyBadge}
-        <span class="scan-status ${exists ? 'exists' : ''}">${exists ? '已存在' : ''}</span>
-        <span class="scan-product"${productTitle}>${productName || ''}</span>
-        <div class="scan-actions">
-          <button class="btn btn-sm btn-primary" onclick="addSingleScanResult('${ip}', '${template || ''}')" ${exists ? 'disabled' : ''}>添加</button>
-        </div>
-      </div>
-    `;
-  }).join('');
-
+  bindScanResultEvents();
   updateScanButtons();
+}
+
+/**
+ * 绑定扫描结果的委托事件（只绑定一次）
+ * - change: 勾选框变化时刷新"批量添加"按钮状态
+ * - click:  行内"添加"按钮（替代原内联 onclick，避免注入）
+ */
+function bindScanResultEvents() {
+  const container = document.getElementById('scan-results');
+  if (!container || !container.dataset) return;
+  if (container.dataset.scanBound === '1') return;
+  container.dataset.scanBound = '1';
+
+  container.addEventListener('change', (e) => {
+    const target = e.target;
+    if (target && target.classList && target.classList.contains('scan-checkbox')) {
+      updateScanButtons();
+    }
+  });
+
+  container.addEventListener('click', (e) => {
+    const target = e.target;
+    const btn = target && target.closest ? target.closest('.scan-add-btn') : null;
+    if (!btn || btn.disabled) return;
+    addSingleScanResult(btn.dataset.ip, btn.dataset.template);
+  });
 }
 
 function updateScanButtons() {
