@@ -1039,7 +1039,9 @@ async function exportScanResults() {
     scanTime: new Date().toISOString(),
     results: scanResults.map(item => ({
       ip: typeof item === 'string' ? item : item.ip,
-      latency: typeof item === 'object' ? item.latency : 0
+      latency: typeof item === 'object' ? item.latency : 0,
+      productName: typeof item === 'object' ? (item.productName || '') : '',
+      bmcVersion: typeof item === 'object' ? (item.bmcVersion || '') : ''
     }))
   };
 

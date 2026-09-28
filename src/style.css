@@ -522,7 +522,8 @@ body {
 /* --- Scan Results --- */
 .scan-result-item {
   display: grid;
-  grid-template-columns: 20px 140px 70px 150px 115px 55px minmax(100px, 1fr) auto;
+  /* 勾选 | IP | 延迟 | 端口 | 验证 | 已存在 | 版本 | 产品名 | 操作 */
+  grid-template-columns: 20px 125px 65px 140px 105px 55px 105px minmax(110px, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: var(--space-sm) var(--space-md);
@@ -566,6 +567,18 @@ body {
 .scan-latency {
   font-size: 11px;
   color: var(--text-muted);
+}
+
+.scan-version {
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .scan-status {
@@ -1218,5 +1231,12 @@ body.dialog-open .xterm-helper-textarea {
 
   .status-badge {
     max-width: 200px;
+  }
+
+  /* 扫描结果表：窄窗下进一步收紧列宽，避免出现横向滚动 */
+  .scan-result-item {
+    grid-template-columns: 20px 115px 55px 120px 95px 50px 95px minmax(90px, 1fr) auto;
+    gap: 6px;
+    padding: var(--space-sm) var(--space-sm);
   }
 }

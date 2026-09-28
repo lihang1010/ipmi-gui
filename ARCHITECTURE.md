@@ -19,6 +19,7 @@ ipmi-gui-electron/
 │       ├── configStore.js     # 配置读写（唯一实现）
 │       ├── ipmiTool.js        # 路径解析 / 参数构建 / 命令行分词（主+渲染共用）
 │       ├── credentials.js     # 凭据模板读取
+│       ├── bmcVersion.js      # mc info 版本号解析
 │       ├── commandRunner.js   # 命令执行封装
 │       ├── favorites.js       # 收藏夹
 │       ├── modal.js           # 模态对话框
@@ -117,7 +118,8 @@ ipmi-gui-electron/
 |------|------|----------|
 | `configStore.js` | 配置读写 (fs 直接操作 %APPDATA%，唯一实现) | 见 test_report.md |
 | `ipmiTool.js` | 路径解析 / 参数构建 / 命令行分词 | 新增 |
-| `credentials.js` | 凭据模板读取（ipmi-credentials.json 唯一入口） | 新增 |
+| `credentials.js` | 凭据模板读取（ipmi-credentials.json 唯一入口） | 见 test_report.md |
+| `bmcVersion.js` | mc info 版本号解析（按厂商取 Aux 字节） | 见 test_report.md |
 | `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | 见 test_report.md |
 | `favorites.js` | 收藏夹 CRUD/执行/排序 | 见 test_report.md |
 | `modal.js` | 自定义 alert/confirm 弹窗 | 见 test_report.md |
@@ -221,6 +223,7 @@ ipmi-gui-electron/
             ├── 第三步: IPMI 验证 (并发 5)
             │       └── verifyIPMITemplate() 逐条尝试 credentials.js 提供的凭据
             │       └── 通过 → 标记 template + verified
+            │       └── 再执行 mc info → bmcVersion.js 生成版本号
             └── 返回结果 → renderScanResults() → scanResultView.js 渲染行
 ```
 
@@ -305,16 +308,16 @@ ipmi-gui-electron/
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| main.js | 258 | 主进程 |
-| renderer.js | 1041 | 渲染进程 (核心) |
-| index.html | 296 | 界面结构 |
-| style.css | 1127 | 样式 |
-| src/modules/*.js (10 个) | 1522 | 业务逻辑模块 |
-| **总计** | **4244** | |
+| main.js | 298 | 主进程 |
+| renderer.js | 1068 | 渲染进程 (核心) |
+| index.html | 306 | 界面结构 |
+| style.css | 1243 | 样式 |
+| src/modules/*.js (11 个) | 1834 | 业务逻辑模块 |
+| **总计** | **4749** | |
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 16 个 *.test.js | 323 |
+| 17 个 *.test.js | 381 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 
@@ -329,8 +332,7 @@ ipmi-gui-electron/
 | 密码明文存储 | 配置文件中密码未加密（可考虑 safeStorage） | 高 |
 | 扫描仍在渲染进程 | child_process/dgram/net 在渲染层执行，应移入主进程 | 中 |
 | 渲染层仍用 nodeIntegration | contextIsolation 关闭 + CSP 含 unsafe-inline/eval | 高 |
-| verifyIPMI 用 exec 拼字符串 | 凭据含引号/特殊字符会破坏命令，建议 execFile | 中 |
-| 无 ESLint / 无错误边界 | 未捕获异常可能导致崩溃 | 低 |
+| 无错误边界 | 未捕获异常可能导致崩溃 | 低 |
 
 ### 已修复（v1.2）
 
@@ -342,6 +344,9 @@ ipmi-gui-electron/
 - `ipmi:execute` 用 `split(' ')` 拼参 → `tokenizeCommand` 支持引号
 - 打包后扫描器找不到 ipmitool → 统一 `resolveIpmiToolPath()`
 - 扫描 CIDR 输入无效、Windows ping 超时恒为 1 秒、UDP 探测误判为开放
+- ipmitool 调用用 shell 拼字符串 → 统一 `runIpmiCommand()`（execFile 逐参数传参）
+- 提示框向上弹出被窗口/面板裁切 → 统一向下弹出 + 左右对齐修饰
+- 窄窗口工具栏换行、状态徽标溢出 → 宽度压缩 + 省略号截断
 
 ---
 

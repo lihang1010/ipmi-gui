@@ -103,6 +103,28 @@ describe('scanResultView', () => {
       expect(html).not.toContain('TCP:443');
     });
 
+    test('应渲染 BMC 版本号列', () => {
+      const html = renderScanResultRow({ ip: '192.168.1.10', bmcVersion: '1.11.1109' });
+      expect(html).toContain('class="scan-version"');
+      expect(html).toContain('1.11.1109');
+    });
+
+    test('无版本号时该列应留空', () => {
+      const html = renderScanResultRow({ ip: '192.168.1.10' });
+      expect(html).toContain('<span class="scan-version" title="BMC 固件版本"></span>');
+    });
+
+    test('版本号应转义', () => {
+      const html = renderScanResultRow({ ip: '192.168.1.10', bmcVersion: '<img src=x>' });
+      expect(html).not.toContain('<img');
+    });
+
+    test('版本号应位于状态列之后、产品列之前', () => {
+      const html = renderScanResultRow({ ip: '192.168.1.10', bmcVersion: '1.11.1109', productName: 'P' });
+      expect(html.indexOf('scan-version')).toBeGreaterThan(html.indexOf('scan-status exists'));
+      expect(html.indexOf('scan-version')).toBeLessThan(html.indexOf('scan-product'));
+    });
+
     test('验证通过应显示模板徽章', () => {
       const html = renderScanResultRow({ ip: '192.168.1.10', template: 'openUBMC' });
       expect(html).toContain('scan-status new');

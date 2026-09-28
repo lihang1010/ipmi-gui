@@ -38,6 +38,7 @@ ipmi-gui-electron/
 │       ├── configStore.js   # 配置读写 (唯一实现)
 │       ├── ipmiTool.js      # 路径解析/参数构建/命令行分词 (主+渲染共用)
 │       ├── credentials.js   # 凭据模板读取
+│       ├── bmcVersion.js    # mc info 版本号解析（AMI/openUBMC 取字节规则）
 │       ├── commandRunner.js # IPMI 命令执行封装
 │       ├── favorites.js     # 收藏夹
 │       ├── utils.js         # 工具函数
@@ -148,9 +149,13 @@ CIDR 展开主机 (cidrToHosts, /24~/30)
          +-- 无 TCP:623 且无 TCP:443 -> 丢弃 (不验证)
          +-- 有 TCP:623 或 TCP:443 -> IPMI 验证 (凭据来自 credentials.js)
                |
-               +-- 通过: 标记 verified + template 名
+               +-- 通过: 标记 verified + template 名，再执行 mc info 取 BMC 版本号
                +-- 失败: TCP:623 开放时标记 verifyHint 提示
 ```
+
+BMC 版本号 = `Firmware Revision` + '.' + Aux 字节，取字节规则见 bmcVersion.js：
+AMI 取 Aux 前 2 字节直接拼接（1.11.1109），openUBMC 取后 2 字节以点分隔（1.11.00.00）。
+ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据不经 shell）。
 
 ---
 
@@ -167,7 +172,7 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - Node 内置模块用 jest.mock() 行内 mock
 - dgram、net、child_process、fs、path、os 均已 mock
 - fullScan 测试设 30s 超时
-- 共 323 用例，16 套件
+- 共 381 用例，17 套件
 
 ---
 

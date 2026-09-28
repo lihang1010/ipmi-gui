@@ -1,0 +1,20 @@
+feat: 扫描结果新增 BMC 固件版本列
+
+- 新增 src/modules/bmcVersion.js 解析 mc info：取 Firmware Revision 为主版本号，
+  再按厂商拼接 Aux Firmware Rev Info（AMI 取前 2 字节直接拼接 -> 1.11.1109；
+  openUBMC 取后 2 字节以点分隔 -> 1.11.00.00；未定义规则的厂商只显示主版本号）
+- 验证成功后执行 mc info，结果写入结果行新增的 BMC版本 列，扫描结果导出也带上
+- ipmitool 调用统一为 runIpmiCommand()（execFile 逐参数传参，凭据含引号/&/|
+  等字符不再破坏命令；凭据缺失时返回明确错误）
+- 结果表列宽收紧，窄窗口(<=980px)进一步收紧，800px 下不再需要横向滚动
+
+修复本次改动引入的回归
+- verifyIPMI 由 (ip, username, password, timeout) 改为 (ip, credential, timeout) 时
+  漏改 verifyIPMITemplate 调用点，credential.username 为 undefined，
+  execFile 收到 undefined 抛错并被 catch 吞掉，表现为所有设备验证失败
+- 补回归测试：断言 execFile 收到的 -U/-P 为模板凭据、argv 全为字符串、
+  凭据形态非法时不抛异常（此前 mock 绕过 argv 类型校验，故未能拦住）
+
+验证: 真实网络实测 192.168.60.176 = AMI/0.01.0000、192.168.60.237 =
+openUBMC/2.00.00.05，与两台设备 mc info 原文一致；17 套件 384 用例通过；
+ESLint 0 问题

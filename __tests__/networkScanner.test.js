@@ -4,6 +4,15 @@
 
 const os = require('os');
 
+// jest.mock 工厂只能引用 mock 前缀的外部变量
+const mockMcInfoOutput = `Device ID                 : 32
+Firmware Revision         : 1.11
+Aux Firmware Rev Info     : 
+    0x11
+    0x09
+    0x00
+    0x00`;
+
 // Mock child_process
 jest.mock('child_process', () => ({
   exec: jest.fn((cmd, opts, cb) => {
@@ -17,6 +26,23 @@ jest.mock('child_process', () => ({
     } else {
       // Simulate failed ipmitool verification (timeout/no response)
       setTimeout(() => cb(new Error('timeout'), '', ''), 10);
+    }
+    return { on: jest.fn() };
+  }),
+  // ipmitool 调用走 execFile（参数不经 shell）
+  execFile: jest.fn((file, args, opts, cb) => {
+    if (typeof opts === 'function') {
+      cb = opts;
+      opts = {};
+    }
+    if (args.includes('raw')) {
+      cb(null, '06 00 00 00\n', '');                 // 验证通过
+    } else if (args.includes('mc')) {
+      cb(null, mockMcInfoOutput, '');                // mc info
+    } else if (args.includes('fru')) {
+      cb(null, 'Board Product             : Test Board\n', '');
+    } else {
+      cb(null, '', '');
     }
     return { on: jest.fn() };
   })
@@ -378,6 +404,102 @@ describe('NetworkScanner Module', () => {
       expect(Array.isArray(result)).toBe(true);
       expect(onProgress.mock.calls[0][0].total).toBe(2);
     }, 30000);
+
+    test('should attach BMC version for verified device', async () => {
+      const result = await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1'],
+        pingConcurrency: 1,
+        pingTimeout: 50,
+        portConcurrency: 1,
+        portTimeout: 50
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].verified).toBe(true);
+      expect(result[0].template).toBe('AMI');
+      expect(result[0].bmcVersion).toBe('1.11.1109');
+    }, 30000);
+
+    test('验证时应传入凭据模板的用户名与密码（回归：曾误传字符串导致全部验证失败）', async () => {
+      await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1'],
+        pingConcurrency: 1,
+        pingTimeout: 50,
+        portConcurrency: 1,
+        portTimeout: 50
+      });
+
+      const { execFile } = require('child_process');
+      const verifyCall = execFile.mock.calls.find(call => call[1].includes('raw'));
+      expect(verifyCall).toBeDefined();
+
+      const args = verifyCall[1];
+      expect(args[args.indexOf('-U') + 1]).toBe('admin');
+      expect(args[args.indexOf('-P') + 1]).toBe('admin');
+      // execFile 遇到非字符串参数会直接抛错，这里必须全部为字符串
+      expect(args.every(arg => typeof arg === 'string')).toBe(true);
+    }, 30000);
+  });
+
+  describe('runIpmiCommand', () => {
+    test('应以 execFile 逐参数传参，凭据不经 shell', async () => {
+      const { execFile } = require('child_process');
+      const credential = { username: 'Administrator', password: 'ttytty`12 & calc' };
+
+      await scanner.runIpmiCommand('192.168.1.1', credential, ['mc', 'info'], 500);
+
+      const calls = execFile.mock.calls;
+      const [file, args] = calls[calls.length - 1];
+      expect(file).toMatch(/ipmitool\.exe$/);
+      expect(args).toContain(credential.password);
+      expect(args).toContain('-I');
+      expect(args).toContain('lanplus');
+      expect(args).toContain('-N');
+      expect(args.slice(-2)).toEqual(['mc', 'info']);
+    });
+
+    test('凭据缺失时应返回明确错误而不是抛异常', async () => {
+      const result = await scanner.runIpmiCommand(
+        '192.168.1.1', { username: 'admin' }, ['mc', 'info'], 100
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('凭据缺失');
+    });
+
+    test('凭据被误传为字符串时不应抛出', async () => {
+      const result = await scanner.runIpmiCommand('192.168.1.1', 'admin', ['mc', 'info'], 100);
+      expect(result.ok).toBe(false);
+    });
+
+    test('未找到 ipmitool 时应返回 ok=false 与明确错误', async () => {
+      const fs = require('fs');
+      fs.existsSync.mockReturnValue(false);
+
+      const result = await scanner.runIpmiCommand(
+        '192.168.1.1', { username: 'a', password: 'b' }, ['mc', 'info'], 100
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('ipmitool.exe');
+
+      fs.existsSync.mockReturnValue(true);
+    });
+
+    test('命令失败时应回传 stderr', async () => {
+      const { execFile } = require('child_process');
+      execFile.mockImplementationOnce((file, args, opts, cb) => {
+        cb(new Error('Command failed'), '', 'Error: Unable to establish IPMI session');
+        return { on: jest.fn() };
+      });
+
+      const result = await scanner.runIpmiCommand(
+        '192.168.1.1', { username: 'a', password: 'b' }, ['mc', 'info'], 100
+      );
+
+      expect(result.ok).toBe(false);
+      expect(result.stderr).toContain('Unable to establish');
+    });
   });
 
   describe('getScanState', () => {

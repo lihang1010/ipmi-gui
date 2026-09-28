@@ -2,11 +2,12 @@
  * 网络扫描模块 - 发现 IPMI 设备 (异步版本)
  */
 
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
 const net = require('net');
 const os = require('os');
 const { resolveIpmiToolPath } = require('./ipmiTool');
 const { getCredentialTemplates, getCredentialByName } = require('./credentials');
+const { formatBmcVersion } = require('./bmcVersion');
 
 let scanState = {
   running: false,
@@ -405,11 +406,19 @@ async function fullScan(subnet, options = {}) {
         device.template = template;
         device.verified = !!template;
 
-        // openUBMC: 验证通过后取 FRU Board Product 拼合产品名
-        if (template === 'openUBMC' && device.productName) {
-          const bp = await fetchFruBoardProduct(device.ip);
-          if (bp) {
-            device.productName = bp + '/' + device.productName;
+        // 通讯验证成功后补充信息（mc info 版本号 / FRU 产品名）
+        if (template) {
+          const credential = getCredentialByName(template);
+          if (credential) {
+            device.bmcVersion = await fetchBmcVersion(device.ip, credential, template);
+          }
+
+          // openUBMC: 取 FRU Board Product 拼合产品名
+          if (template === 'openUBMC' && device.productName) {
+            const bp = await fetchFruBoardProduct(device.ip);
+            if (bp) {
+              device.productName = bp + '/' + device.productName;
+            }
           }
         }
 
@@ -453,7 +462,7 @@ async function verifyIPMITemplate(ip, timeout = 1500) {
 
   for (const template of templates) {
     try {
-      const result = await verifyIPMI(ip, template.username, template.password, timeout);
+      const result = await verifyIPMI(ip, template, timeout);
       if (result.success) {
         return template.name;
       }
@@ -465,54 +474,68 @@ async function verifyIPMITemplate(ip, timeout = 1500) {
 }
 
 /**
- * 验证单个 IPMI 设备
+ * 执行一条 ipmitool 命令
+ * 使用 execFile：参数不经 shell，凭据含引号/&/| 等字符也不会破坏命令。
+ * -N 1 -R 0：不做重试，配合 timeout 快速失败
+ * @param {object} credential { username, password, interface?, cipherSuite? }
+ * @returns {Promise<{ok: boolean, stdout: string, stderr: string, error: string}>}
  */
-async function verifyIPMI(ip, username, password, timeout = 1500) {
+function runIpmiCommand(ip, credential, commandArgs, timeout = 1500) {
   return new Promise((resolve) => {
+    // 参数校验：execFile 遇到 undefined 会抛错，这里提前给出明确原因
+    if (!credential || !credential.username || !credential.password) {
+      resolve({ ok: false, stdout: '', stderr: '', error: '凭据缺失（需要 username 与 password）' });
+      return;
+    }
+
     const ipmitoolPath = resolveIpmiToolPath();
     if (!ipmitoolPath) {
-      resolve({ success: false, error: '未找到 ipmitool.exe' });
+      resolve({ ok: false, stdout: '', stderr: '', error: '未找到 ipmitool.exe' });
       return;
     }
 
     const args = [
       '-H', ip,
-      '-U', username,
-      '-P', password,
-      '-I', 'lanplus',
-      '-C', '17',
+      '-U', credential.username,
+      '-P', credential.password,
+      '-I', credential.interface || 'lanplus',
+      '-C', String(credential.cipherSuite || 17),
       '-N', '1',
       '-R', '0',
-      'raw', '6', '1'
+      ...commandArgs
     ];
 
-    const proc = exec(
-      `"${ipmitoolPath}" ${args.map(a => `"${a}"`).join(' ')}`,
-      { timeout, windowsHide: true },
-      (err, stdout, stderr) => {
-        const hasHexOutput = stdout && /^[0-9a-f\s]+$/i.test(stdout.trim());
-        const hasNoAuthError = !stderr || (
-          !stderr.includes('unauthorized') &&
-          !stderr.includes('authentication') &&
-          !stderr.includes('Invalid password') &&
-          !stderr.includes('RAKP') &&
-          !stderr.includes('SOL')
-        );
-
-        const success = !err && hasHexOutput && hasNoAuthError;
-
-        resolve({
-          success,
-          output: stdout ? stdout.trim() : '',
-          error: stderr ? stderr.trim() : ''
-        });
-      }
-    );
-
-    proc.on('error', (e) => {
-      resolve({ success: false, error: '执行失败: ' + e.message });
+    execFile(ipmitoolPath, args, { timeout, windowsHide: true }, (err, stdout, stderr) => {
+      resolve({
+        ok: !err,
+        stdout: stdout ? stdout.trim() : '',
+        stderr: stderr ? stderr.trim() : '',
+        error: err ? err.message : ''
+      });
     });
   });
+}
+
+/**
+ * 验证单个 IPMI 设备
+ */
+async function verifyIPMI(ip, credential, timeout = 1500) {
+  const result = await runIpmiCommand(ip, credential, ['raw', '6', '1'], timeout);
+
+  const hasHexOutput = /^[0-9a-f\s]+$/i.test(result.stdout);
+  const hasNoAuthError = !result.stderr || (
+    !result.stderr.includes('unauthorized') &&
+    !result.stderr.includes('authentication') &&
+    !result.stderr.includes('Invalid password') &&
+    !result.stderr.includes('RAKP') &&
+    !result.stderr.includes('SOL')
+  );
+
+  return {
+    success: result.ok && hasHexOutput && hasNoAuthError,
+    output: result.stdout,
+    error: result.stderr || result.error
+  };
 }
 
 /**
@@ -521,42 +544,28 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
  */
 async function fetchFruBoardProduct(ip, timeout = 1500) {
   // 仅 openUBMC 设备会走到这里，凭据同样取自统一配置
-  const credential = getCredentialByName('openUBMC') || { username: '', password: '' };
-  const username = credential.username;
-  const password = credential.password;
+  const credential = getCredentialByName('openUBMC');
+  if (!credential) return null;
 
-  return new Promise((resolve) => {
-    const ipmitoolPath = resolveIpmiToolPath();
-    if (!ipmitoolPath) {
-      resolve(null);
-      return;
-    }
+  const result = await runIpmiCommand(ip, credential, ['fru', 'print', '0'], timeout);
+  if (!result.stdout) return null;
 
-    const args = [
-      '-H', ip,
-      '-U', username,
-      '-P', password,
-      '-I', 'lanplus',
-      '-C', '17',
-      'fru', 'print', '0'
-    ];
+  const match = result.stdout.match(/Board Product\s*:\s*(.+)/m);
+  return match ? match[1].trim() : null;
+}
 
-    const proc = exec(
-      '"' + ipmitoolPath + '" ' + args.map(a => '"' + a + '"').join(' '),
-      { timeout, windowsHide: true },
-      (err, stdout, stderr) => {
-        if (stdout) {
-          const match = stdout.match(/Board Product\s*:\s*(.+)/m);
-          if (match) resolve(match[1].trim());
-          else resolve(null);
-        } else {
-          resolve(null);
-        }
-      }
-    );
+/**
+ * 获取 BMC 版本号（仅在 IPMI 通讯验证成功后调用）
+ * 执行 mc info，取 Firmware Revision 为主版本号并按厂商规则拼接 Aux Firmware Rev Info
+ * @returns {Promise<string>} 如 '1.11.1109'，失败返回 ''
+ */
+async function fetchBmcVersion(ip, credential, templateName, timeout = 2000) {
+  if (!credential) return '';
 
-    proc.on('error', () => resolve(null));
-  });
+  const result = await runIpmiCommand(ip, credential, ['mc', 'info'], timeout);
+  if (!result.stdout) return '';
+
+  return formatBmcVersion(result.stdout, templateName);
 }
 
 /**
@@ -581,7 +590,9 @@ module.exports = {
   scanTcpPort,
   tryHttpFetch,
   httpProbeDevice,
+  runIpmiCommand,
   fetchFruBoardProduct,
+  fetchBmcVersion,
   pingScan,
   portScan,
   fullScan,

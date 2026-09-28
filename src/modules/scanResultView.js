@@ -26,6 +26,7 @@ function renderScanResultRow(item, options = {}) {
   const verifyHintType = typeof item === 'object' ? item.verifyHintType : null;
   const productName = typeof item === 'object' ? item.productName : null;
   const productSource = typeof item === 'object' ? item.productSource : null;
+  const bmcVersion = typeof item === 'object' ? item.bmcVersion : null;
 
   const exists = existingIPs.includes(ip);
   const checked = !exists && checkedIPs.includes(ip);
@@ -65,6 +66,7 @@ function renderScanResultRow(item, options = {}) {
       '<span class="scan-ports">' + portsHtml + '</span>' +
       verifyBadge +
       '<span class="scan-status ' + (exists ? 'exists' : '') + '">' + (exists ? '已存在' : '') + '</span>' +
+      '<span class="scan-version" title="BMC 固件版本">' + escapeHtml(bmcVersion || '') + '</span>' +
       '<span class="scan-product"' + productTitle + '>' + safeProduct + '</span>' +
       '<div class="scan-actions">' +
         '<button class="btn btn-sm btn-primary scan-add-btn" data-ip="' + safeIp + '" data-template="' + safeTemplate + '"' + (exists ? ' disabled' : '') + '>添加</button>' +
