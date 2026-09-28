@@ -6,6 +6,7 @@ const { exec } = require('child_process');
 const net = require('net');
 const os = require('os');
 const { resolveIpmiToolPath } = require('./ipmiTool');
+const { getCredentialTemplates, getCredentialByName } = require('./credentials');
 
 let scanState = {
   running: false,
@@ -449,18 +450,7 @@ async function fullScan(subnet, options = {}) {
  * 验证 IPMI 设备使用哪个模板
  */
 async function verifyIPMITemplate(ip, timeout = 1500) {
-  // 从配置文件读取凭证
-  let templates;
-  try {
-    templates = require('../config/ipmi-credentials.json').templates;
-  } catch (e) {
-    // 配置文件读取失败时使用默认值
-    templates = [
-      { name: 'AMI', username: 'admin', password: 'admin' },
-      { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
-      { name: 'OpenBMC', username: 'root', password: '0penBmc' }
-    ];
-  }
+  const templates = getCredentialTemplates();
 
   for (const template of templates) {
     try {
@@ -531,8 +521,10 @@ async function verifyIPMI(ip, username, password, timeout = 1500) {
  * 使用默认凭据运行 ipmitool fru print 0，解析 Board Product 字段
  */
 async function fetchFruBoardProduct(ip, timeout = 1500) {
-  const username = 'Administrator';
-  const password = 'ttytty`12';
+  // 仅 openUBMC 设备会走到这里，凭据同样取自统一配置
+  const credential = getCredentialByName('openUBMC') || { username: '', password: '' };
+  const username = credential.username;
+  const password = credential.password;
 
   return new Promise((resolve) => {
     const ipmitoolPath = resolveIpmiToolPath();

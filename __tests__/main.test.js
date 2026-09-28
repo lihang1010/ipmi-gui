@@ -120,30 +120,7 @@ describe('Main Process Logic', () => {
     });
   });
 
-  describe('getIpmiToolPath logic', () => {
-    function getIpmiToolPath() {
-      const exeDir = '/mock/app';
-      const searchPaths = [
-        path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
-        path.join('/mock/__dirname', 'bin', 'ipmitool.exe'),
-        path.join('/mock/__dirname', '..', 'ipmitool', 'ipmitool.exe'),
-        path.join(exeDir, 'ipmitool.exe'),
-        'D:\\tools\\ipmitool\\ipmitool.exe'
-      ];
-      return searchPaths[0];
-    }
-
-    test('should return a path string', () => {
-      const p = getIpmiToolPath();
-      expect(typeof p).toBe('string');
-      expect(p).toContain('ipmitool.exe');
-    });
-
-    test('should return first path as default', () => {
-      const p = getIpmiToolPath();
-      expect(p).toContain('resources');
-    });
-  });
+  // ipmitool 路径解析的测试见 __tests__/ipmiTool.test.js（已抽到 src/modules/ipmiTool.js）
 
   describe('Config Operations', () => {
     test('should handle config file path', () => {
@@ -310,26 +287,22 @@ describe('Main Process Logic', () => {
   describe('IPC Channel Names', () => {
     test('should have correct channel names', () => {
       const channels = {
-        configGet: 'config:get',
-        configSave: 'config:save',
         ipmiExecute: 'ipmi:execute',
         solStart: 'sol:start',
         solStop: 'sol:stop',
+        solClose: 'sol:close',
         solWrite: 'sol:write',
-        solDeactivate: 'sol:deactivate',
         fileSave: 'file:save',
         dialogSelectDir: 'dialog:selectDirectory',
         dialogSelectFile: 'dialog:selectFile',
         appGetMemory: 'app:getMemory'
       };
 
-      expect(channels.configGet).toBe('config:get');
-      expect(channels.configSave).toBe('config:save');
       expect(channels.ipmiExecute).toBe('ipmi:execute');
       expect(channels.solStart).toBe('sol:start');
       expect(channels.solStop).toBe('sol:stop');
+      expect(channels.solClose).toBe('sol:close');
       expect(channels.solWrite).toBe('sol:write');
-      expect(channels.solDeactivate).toBe('sol:deactivate');
       expect(channels.fileSave).toBe('file:save');
       expect(channels.dialogSelectDir).toBe('dialog:selectDirectory');
       expect(channels.dialogSelectFile).toBe('dialog:selectFile');

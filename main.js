@@ -16,36 +16,6 @@ process.stderr.write = function(chunk, ...args) {
 
 let mainWindow;
 let ptyProcesses = {};  // 多标签支持：{ tabId: ptyProcess }
-let configPath = path.join(app.getPath('userData'), 'config.json');
-
-// 默认配置
-const defaultConfig = {
-  servers: [],
-  settings: {
-    logDir: path.join(app.getPath('temp'), 'ipmi_logs')
-  }
-};
-
-// 加载配置
-function loadConfig() {
-  try {
-    if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-    }
-  } catch (e) {
-    console.error('加载配置失败:', e);
-  }
-  return defaultConfig;
-}
-
-// 保存配置
-function saveConfig(config) {
-  try {
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2), 'utf-8');
-  } catch (e) {
-    console.error('保存配置失败:', e);
-  }
-}
 
 // 创建主窗口
 function createWindow() {
@@ -85,14 +55,8 @@ ipcMain.handle('app:getMemory', () => {
   };
 });
 
-// 获取配置
-ipcMain.handle('config:get', () => loadConfig());
-
-// 保存配置
-ipcMain.handle('config:save', (event, config) => {
-  saveConfig(config);
-  return true;
-});
+// 配置读写统一由渲染进程的 src/modules/configStore.js 负责
+// （路径 %APPDATA%/ipmi-gui/config.json），主进程不再维护第二份实现
 
 // 执行 IPMI 命令
 ipcMain.handle('ipmi:execute', async (event, server, command, args = []) => {
@@ -177,10 +141,15 @@ ipcMain.on('sol:write', (event, tabId, data) => {
   }
 });
 
-// 停止 SOL - 直接执行 deactivate
-ipcMain.handle('sol:stop', async (event, server) => {
+/**
+ * 执行 sol deactivate 释放远端 SOL 会话
+ * @returns {Promise<{success:boolean, stderr?:string, error?:string}>}
+ */
+function deactivateSolSession(server) {
   const ipmitoolPath = getIpmiToolPath();
-  if (!ipmitoolPath) return { success: false, error: IPMITOOL_MISSING };
+  if (!ipmitoolPath) {
+    return Promise.resolve({ success: false, error: IPMITOOL_MISSING });
+  }
 
   const args = [...buildArgs(server), 'sol', 'deactivate'];
 
@@ -201,33 +170,10 @@ ipcMain.handle('sol:stop', async (event, server) => {
       resolve({ success: false, error: err.message });
     });
   });
-});
+}
 
-// 执行 sol deactivate
-ipcMain.handle('sol:deactivate', async (event, server) => {
-  const ipmitoolPath = getIpmiToolPath();
-  if (!ipmitoolPath) return { success: false, error: IPMITOOL_MISSING };
-
-  const args = [...buildArgs(server), 'sol', 'deactivate'];
-
-  return new Promise((resolve) => {
-    const spawn = require('child_process').spawn;
-    const proc = spawn(ipmitoolPath, args, {
-      windowsHide: true
-    });
-
-    let stderr = '';
-    proc.stderr.on('data', (data) => { stderr += data; });
-
-    proc.on('close', (code) => {
-      resolve({ success: code === 0, stderr });
-    });
-
-    proc.on('error', (err) => {
-      resolve({ success: false, error: err.message });
-    });
-  });
-});
+// 停止 SOL（释放远端会话，本地 PTY 由 sol:close 回收）
+ipcMain.handle('sol:stop', (event, server) => deactivateSolSession(server));
 
 // 关闭 SOL 标签：强制结束本地 PTY，再 deactivate 远端会话
 ipcMain.handle('sol:close', async (event, tabId, server) => {
@@ -240,29 +186,10 @@ ipcMain.handle('sol:close', async (event, tabId, server) => {
   // 没有服务器信息时只做本地清理
   if (!server) return { success: true };
 
-  const ipmitoolPath = getIpmiToolPath();
   // 本地 PTY 已回收，仅远端会话无法释放
-  if (!ipmitoolPath) return { success: true, warning: IPMITOOL_MISSING };
+  if (!getIpmiToolPath()) return { success: true, warning: IPMITOOL_MISSING };
 
-  const args = [...buildArgs(server), 'sol', 'deactivate'];
-
-  return new Promise((resolve) => {
-    const spawn = require('child_process').spawn;
-    const deactivateProc = spawn(ipmitoolPath, args, {
-      windowsHide: true
-    });
-
-    let stderr = '';
-    deactivateProc.stderr.on('data', (data) => { stderr += data; });
-
-    deactivateProc.on('close', (code) => {
-      resolve({ success: code === 0, stderr });
-    });
-
-    deactivateProc.on('error', (err) => {
-      resolve({ success: false, error: err.message });
-    });
-  });
+  return deactivateSolSession(server);
 });
 
 // ========== 文件操作 ==========

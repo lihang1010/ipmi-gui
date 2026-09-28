@@ -16,6 +16,7 @@ const { executeCommand, executePower, executeSensor, executeRawCommand } = requi
 const favorites = require('./modules/favorites');
 const scanner = require('./modules/networkScanner');
 const { renderScanResultRow } = require('./modules/scanResultView');
+const { getCredentialByName } = require('./modules/credentials');
 
 // ========== 全局状态 ==========
 let _currentServer = null;
@@ -937,23 +938,7 @@ function deselectAllScanResults() {
 async function addSingleScanResult(ip, templateName) {
   const config = getConfig();
 
-  // 从配置文件读取凭证
-  let credentialTemplates;
-  try {
-    credentialTemplates = require('../config/ipmi-credentials.json').templates;
-  } catch (e) {
-    credentialTemplates = [
-      { name: 'AMI', username: 'admin', password: 'admin' },
-      { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
-      { name: 'OpenBMC', username: 'root', password: '0penBmc' }
-    ];
-  }
-
-  // 转换为以名称为键的对象
-  const templates = {};
-  credentialTemplates.forEach(t => { templates[t.name] = t; });
-
-  const template = templates[templateName] || templates['openUBMC'];
+  const template = getCredentialByName(templateName) || getCredentialByName('openUBMC');
 
   const server = {
     id: Date.now().toString(),
@@ -981,21 +966,7 @@ async function addSelectedScanResults() {
     return;
   }
 
-  // 从配置文件读取凭证
-  let credentialTemplates;
-  try {
-    credentialTemplates = require('../config/ipmi-credentials.json').templates;
-  } catch (e) {
-    credentialTemplates = [
-      { name: 'AMI', username: 'admin', password: 'admin' },
-      { name: 'openUBMC', username: 'Administrator', password: 'ttytty`12' },
-      { name: 'OpenBMC', username: 'root', password: '0penBmc' }
-    ];
-  }
-
-  // 转换为以名称为键的对象
-  const templates = {};
-  credentialTemplates.forEach(t => { templates[t.name] = t; });
+  const defaultTemplate = getCredentialByName('openUBMC');
 
   const config = getConfig();
   let added = 0;
@@ -1005,8 +976,7 @@ async function addSelectedScanResults() {
     if (!config.servers.some(s => s.host === ip)) {
       // 从扫描结果中获取模板信息
       const result = scanResults.find(r => r.ip === ip);
-      const templateName = result ? result.template : null;
-      const template = templates[templateName] || templates['openUBMC'];
+      const template = getCredentialByName(result ? result.template : null) || defaultTemplate;
 
       config.servers.push({
         id: Date.now().toString() + Math.random().toString(36).slice(2, 6),

@@ -1,32 +1,14 @@
 /**
  * 服务器模板模块
+ *
+ * 凭据统一取自 src/config/ipmi-credentials.json（见 credentials.js），
+ * 此处只保留 interface / cipherSuite 等 UI 元数据。
  */
 
-const SERVER_TEMPLATES = {
-  openubmc: {
-    name: 'openUBMC',
-    username: 'Administrator',
-    password: 'ttytty`12',
-    interface: 'lanplus',
-    cipherSuite: 17
-  },
-  ami: {
-    name: 'AMI',
-    username: 'admin',
-    password: 'admin',
-    interface: 'lanplus',
-    cipherSuite: 17
-  },
-  openbmc: {
-    name: 'OpenBMC',
-    username: 'root',
-    password: '0penBmc',
-    interface: 'lanplus',
-    cipherSuite: 17
-  }
-};
-
 const { isValidIP } = require('./utils');
+const { getServerTemplates } = require('./credentials');
+
+const SERVER_TEMPLATES = getServerTemplates();
 
 /**
  * 应用模板到表单
