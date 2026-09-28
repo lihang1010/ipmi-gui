@@ -340,6 +340,9 @@ function bindEvents() {
   document.getElementById('btn-sol-new-tab').addEventListener('click', () => addSolTab());
 
   // 收藏夹按钮
+  document.getElementById('fav-category-filter').addEventListener('change', (e) => favorites.setCategoryFilter(e.target.value));
+  document.getElementById('btn-import-favorites').addEventListener('click', () => favorites.importFavorites());
+  document.getElementById('btn-export-favorites').addEventListener('click', () => favorites.exportFavorites());
   document.getElementById('btn-add-favorite').addEventListener('click', () => favorites.openDialog());
   document.getElementById('btn-exec-favorite').addEventListener('click', () => favorites.executeSelected(getCurrentServer()));
   document.getElementById('btn-edit-favorite').addEventListener('click', () => favorites.editSelected());
@@ -626,7 +629,12 @@ async function exportConfig() {
   const exportData = { exportTime: new Date().toISOString(), version: '1.0', servers: config.servers };
   const content = JSON.stringify(exportData, null, 2);
   const defaultPath = require('path').join(process.env.USERPROFILE || process.env.HOME, 'Desktop', 'ipmi_servers_' + new Date().toISOString().slice(0, 10) + '.json');
-  const result = await ipcRenderer.invoke('file:save', defaultPath, content);
+  const result = await ipcRenderer.invoke(
+    'file:save',
+    defaultPath,
+    content,
+    [{ name: 'JSON 文件', extensions: ['json'] }, { name: '所有文件', extensions: ['*'] }]
+  );
   if (result.success) showStatus('connected', '配置已导出');
 }
 
@@ -814,7 +822,8 @@ async function updateMemoryInfo() {
       el.classList.add('warning');
     }
 
-    el.title = `物理内存: ${mem.rss} MB\n堆内存: ${mem.heapUsed}/${mem.heapTotal} MB\n外部内存: ${mem.external} MB`;
+    // 提示统一走 CSS data-tooltip（多行，右对齐），不再额外设原生 title
+    el.dataset.tooltip = `物理内存: ${mem.rss} MB\n堆内存: ${mem.heapUsed}/${mem.heapTotal} MB\n外部内存: ${mem.external} MB`;
   } catch (e) {
     // 静默失败
   }
@@ -1041,7 +1050,12 @@ async function exportScanResults() {
     `ipmi_scan_${new Date().toISOString().slice(0, 10)}.json`
   );
 
-  const result = await ipcRenderer.invoke('file:save', defaultPath, content);
+  const result = await ipcRenderer.invoke(
+    'file:save',
+    defaultPath,
+    content,
+    [{ name: 'JSON 文件', extensions: ['json'] }, { name: '所有文件', extensions: ['*'] }]
+  );
   if (result.success) {
     showStatus('connected', '扫描结果已导出');
   }

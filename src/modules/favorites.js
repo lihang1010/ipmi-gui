@@ -1,22 +1,150 @@
 /**
  * 收藏夹模块
+ *
+ * 收藏项结构: { name, command, desc, category }
+ * - category 取值见 FAVORITE_CATEGORIES，空字符串表示"通用"
+ * - 分类筛选、导入解析、去重合并均为纯函数，便于单元测试
  */
 
 const { ipcRenderer } = require('electron');
+const path = require('path');
 const { safeAlert, safeConfirm } = require('./modal');
 const { escapeHtml, showStatus } = require('./utils');
 const { getConfig, saveConfig } = require('./configStore');
 
+// 收藏命令分类（新增分类只需在此追加）
+const FAVORITE_CATEGORIES = ['AMI', 'openUBMC', 'onetree'];
+// 未分类的显示名
+const GENERAL_CATEGORY_LABEL = '通用';
+// 筛选用的哨兵值（不会与分类名冲突）
+const FILTER_ALL = 'all';
+const FILTER_GENERAL = 'none';
+
 let favorites = [];
 let selectedIndex = -1;
 let editingIndex = -1;
+let categoryFilter = FILTER_ALL;
+
+// ========== 纯函数 ==========
+
+/**
+ * 归一化分类值：非法/缺失一律视为"通用"（空字符串）
+ */
+function normalizeCategory(value) {
+  return FAVORITE_CATEGORIES.indexOf(value) === -1 ? '' : value;
+}
+
+/**
+ * 分类显示名
+ */
+function categoryLabel(category) {
+  return normalizeCategory(category) || GENERAL_CATEGORY_LABEL;
+}
+
+/**
+ * 按分类筛选收藏
+ * @param {Array} list 收藏列表
+ * @param {string} filter FILTER_ALL / FILTER_GENERAL / 具体分类名
+ */
+function filterFavorites(list, filter) {
+  if (!filter || filter === FILTER_ALL) return list;
+  if (filter === FILTER_GENERAL) {
+    return list.filter(fav => !normalizeCategory(fav.category));
+  }
+  return list.filter(fav => normalizeCategory(fav.category) === filter);
+}
+
+/**
+ * 生成分类下拉框的 option HTML
+ * @param {boolean} includeAll true 生成筛选用（含"全部"/"通用"），false 生成表单用
+ */
+function buildCategoryOptions(includeAll) {
+  const options = [];
+  if (includeAll) {
+    options.push('<option value="' + FILTER_ALL + '">全部</option>');
+    options.push('<option value="' + FILTER_GENERAL + '">' + GENERAL_CATEGORY_LABEL + '</option>');
+  } else {
+    options.push('<option value="">' + GENERAL_CATEGORY_LABEL + '</option>');
+  }
+  FAVORITE_CATEGORIES.forEach(category => {
+    options.push('<option value="' + category + '">' + category + '</option>');
+  });
+  return options.join('');
+}
+
+/**
+ * 解析导入文件内容
+ * 兼容 { favorites: [...] } 与裸数组两种格式
+ * @returns {{ok: true, favorites: Array}|{ok: false, error: string}}
+ */
+function parseFavoritesFile(content) {
+  let data;
+  try {
+    data = JSON.parse(content);
+  } catch (e) {
+    return { ok: false, error: '文件不是合法的 JSON' };
+  }
+
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.favorites) ? data.favorites : null);
+  if (!list) return { ok: false, error: '未找到 favorites 数组' };
+
+  const valid = list
+    .filter(item => item && typeof item.name === 'string' && typeof item.command === 'string')
+    .map(item => ({
+      name: item.name.trim(),
+      command: item.command.trim(),
+      desc: typeof item.desc === 'string' ? item.desc : '',
+      category: normalizeCategory(item.category)
+    }))
+    .filter(item => item.name && item.command);
+
+  if (valid.length === 0) {
+    return { ok: false, error: '没有有效的收藏项（每项需包含 name 与 command）' };
+  }
+  return { ok: true, favorites: valid };
+}
+
+/**
+ * 合并收藏（按 名称 + 命令 + 分类 去重，同名同命令但不同分类视为两条）
+ * @returns {{list: Array, added: number}}
+ */
+function mergeFavorites(existing, incoming) {
+  const keyOf = (fav) => fav.name + '\u0000' + fav.command + '\u0000' + normalizeCategory(fav.category);
+  const seen = new Set(existing.map(keyOf));
+  const list = existing.slice();
+  let added = 0;
+
+  incoming.forEach(fav => {
+    const key = keyOf(fav);
+    if (seen.has(key)) return;
+    seen.add(key);
+    list.push(fav);
+    added++;
+  });
+
+  return { list, added };
+}
+
+// ========== 列表渲染 ==========
 
 /**
  * 加载收藏夹
  */
 function loadFavorites() {
   favorites = getConfig().favorites || [];
+  renderCategorySelects();
   render();
+}
+
+/**
+ * 填充分类下拉框
+ */
+function renderCategorySelects() {
+  const dialogSelect = document.getElementById('fav-category');
+  if (dialogSelect) dialogSelect.innerHTML = buildCategoryOptions(false);
+
+  const filterSelect = document.getElementById('fav-category-filter');
+  if (filterSelect) filterSelect.innerHTML = buildCategoryOptions(true);
 }
 
 /**
@@ -29,7 +157,7 @@ function saveFavorites() {
 }
 
 /**
- * 渲染收藏列表
+ * 渲染收藏列表（按当前分类筛选）
  */
 function render() {
   const list = document.getElementById('favorites-list');
@@ -37,24 +165,35 @@ function render() {
 
   if (favorites.length === 0) {
     list.innerHTML = '<div class="favorites-empty"><div class="favorites-empty-icon">+</div><div>暂无收藏</div><div style="font-size:12px">点击"添加收藏"按钮添加常用命令</div></div>';
+    updateButtons();
     return;
   }
 
-  list.innerHTML = favorites.map((fav, i) =>
-    `<div class="favorite-item ${i === selectedIndex ? 'selected' : ''}" data-index="${i}">
-      <div class="fav-icon">></div>
-      <div class="fav-info">
-        <div class="fav-name">${escapeHtml(fav.name)}</div>
-        <div class="fav-command">${escapeHtml(fav.command)}</div>
-      </div>
-    </div>`
-  ).join('');
+  const visible = filterFavorites(favorites, categoryFilter);
+  if (visible.length === 0) {
+    list.innerHTML = '<div class="favorites-empty"><div>当前分类下暂无收藏</div><div style="font-size:12px">切换分类或添加新的收藏</div></div>';
+    updateButtons();
+    return;
+  }
+
+  list.innerHTML = visible.map(fav => {
+    const index = favorites.indexOf(fav);
+    const category = normalizeCategory(fav.category);
+    return '<div class="favorite-item ' + (index === selectedIndex ? 'selected' : '') + '" data-index="' + index + '">' +
+      '<div class="fav-icon">></div>' +
+      '<div class="fav-info">' +
+        '<div class="fav-name">' + escapeHtml(fav.name) + '</div>' +
+        '<div class="fav-command">' + escapeHtml(fav.command) + '</div>' +
+      '</div>' +
+      '<span class="fav-category' + (category ? '' : ' general') + '">' + escapeHtml(categoryLabel(fav.category)) + '</span>' +
+    '</div>';
+  }).join('');
 
   // 使用事件委托
   list.onclick = (e) => {
     const item = e.target.closest('.favorite-item');
     if (item) {
-      const index = parseInt(item.dataset.index);
+      const index = parseInt(item.dataset.index, 10);
       if (e.detail === 2) {
         // 双击执行
         execute(index);
@@ -64,6 +203,8 @@ function render() {
       }
     }
   };
+
+  updateButtons();
 }
 
 /**
@@ -76,9 +217,30 @@ function select(index) {
 
   const fav = favorites[index];
   const preview = document.getElementById('favorites-preview');
-  if (preview) {
-    preview.textContent = '命令: ' + fav.command + (fav.desc ? '\n描述: ' + fav.desc : '');
+  if (preview && fav) {
+    preview.textContent = '分类: ' + categoryLabel(fav.category) +
+      '\n命令: ' + fav.command +
+      (fav.desc ? '\n描述: ' + fav.desc : '');
   }
+}
+
+/**
+ * 切换分类筛选
+ */
+function setCategoryFilter(value) {
+  categoryFilter = value || FILTER_ALL;
+  selectedIndex = -1;
+  const preview = document.getElementById('favorites-preview');
+  if (preview) preview.textContent = '选择收藏的命令查看详情';
+  render();
+  updateButtons();
+}
+
+/**
+ * 获取当前分类筛选值
+ */
+function getCategoryFilter() {
+  return categoryFilter;
 }
 
 /**
@@ -99,6 +261,8 @@ function updateButtons() {
   if (btnDown) btnDown.disabled = !has || selectedIndex === favorites.length - 1;
 }
 
+// ========== 编辑 ==========
+
 /**
  * 打开编辑对话框
  */
@@ -108,6 +272,7 @@ function openDialog(fav = null, index = -1) {
   document.getElementById('fav-name').value = fav ? fav.name : '';
   document.getElementById('fav-command').value = fav ? fav.command : '';
   document.getElementById('fav-desc').value = fav ? (fav.desc || '') : '';
+  document.getElementById('fav-category').value = fav ? normalizeCategory(fav.category) : '';
   document.getElementById('favorite-dialog').style.display = 'flex';
   setTimeout(() => document.getElementById('fav-name').focus(), 50);
 }
@@ -127,6 +292,7 @@ async function save() {
   const name = document.getElementById('fav-name').value.trim();
   const command = document.getElementById('fav-command').value.trim();
   const desc = document.getElementById('fav-desc').value.trim();
+  const category = normalizeCategory(document.getElementById('fav-category').value);
 
   if (!name || !command) {
     await safeAlert('请填写名称和命令');
@@ -134,9 +300,9 @@ async function save() {
   }
 
   if (editingIndex >= 0) {
-    favorites[editingIndex] = { name, command, desc };
+    favorites[editingIndex] = { name, command, desc, category };
   } else {
-    favorites.push({ name, command, desc });
+    favorites.push({ name, command, desc, category });
   }
 
   saveFavorites();
@@ -169,6 +335,8 @@ async function deleteSelected() {
   render();
   updateButtons();
 }
+
+// ========== 执行 ==========
 
 /**
  * 执行选中的收藏
@@ -227,6 +395,79 @@ function move(dir) {
   updateButtons();
 }
 
+// ========== 导入 / 导出 ==========
+
+/**
+ * 生成桌面上的默认导出路径
+ */
+function getDefaultExportPath(prefix) {
+  const desktop = path.join(process.env.USERPROFILE || process.env.HOME || '', 'Desktop');
+  return path.join(desktop, prefix + '_' + new Date().toISOString().slice(0, 10) + '.json');
+}
+
+/**
+ * 导出收藏夹
+ */
+async function exportFavorites() {
+  if (favorites.length === 0) {
+    await safeAlert('没有可导出的收藏');
+    return;
+  }
+
+  const payload = {
+    exportTime: new Date().toISOString(),
+    version: '1.0',
+    favorites
+  };
+
+  const result = await ipcRenderer.invoke(
+    'file:save',
+    getDefaultExportPath('ipmi_favorites'),
+    JSON.stringify(payload, null, 2),
+    [{ name: 'JSON 文件', extensions: ['json'] }, { name: '所有文件', extensions: ['*'] }]
+  );
+
+  if (result && result.success) {
+    showStatus('connected', '收藏已导出');
+  }
+}
+
+/**
+ * 导入收藏夹（合并，按 名称+命令 去重）
+ */
+async function importFavorites() {
+  const filePath = await ipcRenderer.invoke('dialog:selectFile', [
+    { name: 'JSON 文件', extensions: ['json'] },
+    { name: '所有文件', extensions: ['*'] }
+  ]);
+  if (!filePath) return;
+
+  try {
+    const content = require('fs').readFileSync(filePath, 'utf-8');
+    const parsed = parseFavoritesFile(content);
+    if (!parsed.ok) {
+      await safeAlert('导入失败: ' + parsed.error);
+      return;
+    }
+
+    const merged = mergeFavorites(favorites, parsed.favorites);
+    const ok = await safeConfirm(
+      '文件中找到 ' + parsed.favorites.length + ' 条收藏。\n\n' +
+      '点击"确定"合并到现有收藏（新增 ' + merged.added + ' 条，重复 ' +
+      (parsed.favorites.length - merged.added) + ' 条将跳过）'
+    );
+    if (!ok) return;
+
+    favorites = merged.list;
+    saveFavorites();
+    render();
+    updateButtons();
+    showStatus('connected', '已导入 ' + merged.added + ' 条收藏');
+  } catch (err) {
+    await safeAlert('导入失败: ' + err.message);
+  }
+}
+
 /**
  * 获取当前选中索引
  */
@@ -235,10 +476,23 @@ function getSelectedIndex() {
 }
 
 module.exports = {
+  FAVORITE_CATEGORIES,
+  GENERAL_CATEGORY_LABEL,
+  FILTER_ALL,
+  FILTER_GENERAL,
+  normalizeCategory,
+  categoryLabel,
+  filterFavorites,
+  buildCategoryOptions,
+  parseFavoritesFile,
+  mergeFavorites,
   loadFavorites,
   saveFavorites,
   render,
+  renderCategorySelects,
   select,
+  setCategoryFilter,
+  getCategoryFilter,
   updateButtons,
   openDialog,
   closeDialog,
@@ -248,5 +502,8 @@ module.exports = {
   executeSelected,
   execute,
   move,
+  exportFavorites,
+  importFavorites,
+  getDefaultExportPath,
   getSelectedIndex
 };

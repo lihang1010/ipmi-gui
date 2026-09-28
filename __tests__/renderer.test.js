@@ -163,6 +163,9 @@ jest.mock('../src/modules/favorites', () => ({
   executeSelected: jest.fn(),
   execute: jest.fn(),
   move: jest.fn(),
+  setCategoryFilter: jest.fn(),
+  importFavorites: jest.fn(),
+  exportFavorites: jest.fn(),
   getSelectedIndex: jest.fn().mockReturnValue(-1)
 }));
 

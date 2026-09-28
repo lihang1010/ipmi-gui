@@ -196,10 +196,10 @@ ipcMain.handle('sol:close', async (event, tabId, server) => {
 // ========== 文件操作 ==========
 
 // 保存文件
-ipcMain.handle('file:save', async (event, defaultName, content) => {
+ipcMain.handle('file:save', async (event, defaultName, content, filters) => {
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: defaultName,
-    filters: [
+    filters: filters || [
       { name: '日志文件', extensions: ['log', 'txt'] },
       { name: '所有文件', extensions: ['*'] }
     ]

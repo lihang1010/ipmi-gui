@@ -68,6 +68,10 @@ jest.mock('electron', () => ({
   }
 }));
 
+jest.mock('fs', () => ({
+  readFileSync: jest.fn()
+}));
+
 const favorites = require('../src/modules/favorites');
 const configStore = require('../src/modules/configStore');
 const { safeAlert, safeConfirm } = require('../src/modules/modal');
@@ -436,6 +440,327 @@ describe('Favorites Module', () => {
       ];
       favorites.loadFavorites();
       expect(document.getElementById('favorites-list')).toBeDefined();
+    });
+  });
+
+  // ========== 分类 ==========
+
+  describe('分类纯函数', () => {
+    test('normalizeCategory 应只接受已定义分类', () => {
+      expect(favorites.normalizeCategory('AMI')).toBe('AMI');
+      expect(favorites.normalizeCategory('openUBMC')).toBe('openUBMC');
+      expect(favorites.normalizeCategory('onetree')).toBe('onetree');
+      expect(favorites.normalizeCategory('unknown')).toBe('');
+      expect(favorites.normalizeCategory(undefined)).toBe('');
+    });
+
+    test('categoryLabel 空分类显示为"通用"', () => {
+      expect(favorites.categoryLabel('AMI')).toBe('AMI');
+      expect(favorites.categoryLabel('')).toBe('通用');
+      expect(favorites.categoryLabel(null)).toBe('通用');
+    });
+
+    test('FAVORITE_CATEGORIES 应包含三个厂商分类', () => {
+      expect(favorites.FAVORITE_CATEGORIES).toEqual(['AMI', 'openUBMC', 'onetree']);
+    });
+
+    test('filterFavorites 支持 全部/通用/指定分类', () => {
+      const list = [
+        { name: 'A', command: 'c', category: 'AMI' },
+        { name: 'B', command: 'c', category: 'onetree' },
+        { name: 'C', command: 'c' }
+      ];
+      expect(favorites.filterFavorites(list, favorites.FILTER_ALL)).toHaveLength(3);
+      expect(favorites.filterFavorites(list, favorites.FILTER_GENERAL).map(f => f.name)).toEqual(['C']);
+      expect(favorites.filterFavorites(list, 'AMI').map(f => f.name)).toEqual(['A']);
+      expect(favorites.filterFavorites(list, 'openUBMC')).toHaveLength(0);
+    });
+
+    test('filterFavorites 空筛选值等价于全部', () => {
+      const list = [{ name: 'A', command: 'c' }];
+      expect(favorites.filterFavorites(list, '')).toHaveLength(1);
+    });
+
+    test('buildCategoryOptions 表单模式与筛选模式', () => {
+      const formOptions = favorites.buildCategoryOptions(false);
+      expect(formOptions).toContain('<option value="">通用</option>');
+      expect(formOptions).toContain('onetree');
+      expect(formOptions).not.toContain('全部');
+
+      const filterOptions = favorites.buildCategoryOptions(true);
+      expect(filterOptions).toContain('全部');
+      expect(filterOptions).toContain('通用');
+      expect(filterOptions).toContain('AMI');
+    });
+  });
+
+  describe('分类交互', () => {
+    const restoreDocument = () => {
+      document.getElementById = jest.fn((id) => {
+        if (!mockElements[id]) mockElements[id] = createMockEl(id);
+        return mockElements[id];
+      });
+    };
+
+    test('renderCategorySelects 应填充两个下拉框', () => {
+      restoreDocument();
+      favorites.renderCategorySelects();
+      expect(mockElements['fav-category'].innerHTML).toContain('通用');
+      expect(mockElements['fav-category-filter'].innerHTML).toContain('全部');
+    });
+
+    test('setCategoryFilter 应过滤列表并清除选中', () => {
+      restoreDocument();
+      const config = configStore.getConfig();
+      config.favorites = [
+        { name: 'A', command: 'c', category: 'AMI' },
+        { name: 'B', command: 'c', category: 'onetree' }
+      ];
+      favorites.loadFavorites();
+
+      favorites.setCategoryFilter('AMI');
+      expect(favorites.getCategoryFilter()).toBe('AMI');
+      expect(favorites.getSelectedIndex()).toBe(-1);
+      expect(mockElements['favorites-list'].innerHTML).toContain('A');
+      expect(mockElements['favorites-list'].innerHTML).not.toContain('B');
+    });
+
+    test('筛选到空分类时显示空状态', () => {
+      restoreDocument();
+      const config = configStore.getConfig();
+      config.favorites = [{ name: 'A', command: 'c', category: 'AMI' }];
+      favorites.loadFavorites();
+
+      favorites.setCategoryFilter('onetree');
+      expect(mockElements['favorites-list'].innerHTML).toContain('当前分类下暂无收藏');
+    });
+
+    test('列表项应带上分类标签', () => {
+      restoreDocument();
+      const config = configStore.getConfig();
+      config.favorites = [
+        { name: 'A', command: 'c', category: 'onetree' },
+        { name: 'B', command: 'c' }
+      ];
+      favorites.setCategoryFilter(favorites.FILTER_ALL);
+      favorites.loadFavorites();
+
+      const html = mockElements['favorites-list'].innerHTML;
+      expect(html).toContain('fav-category');
+      expect(html).toContain('onetree');
+      expect(html).toContain('general');
+    });
+
+    test('openDialog 应回填分类', () => {
+      restoreDocument();
+      favorites.openDialog({ name: 'A', command: 'c', category: 'AMI' }, 0);
+      expect(mockElements['fav-category'].value).toBe('AMI');
+    });
+
+    test('openDialog 新增时分类为空', () => {
+      restoreDocument();
+      favorites.openDialog();
+      expect(mockElements['fav-category'].value).toBe('');
+    });
+
+    test('save 应保存分类字段', async () => {
+      const nameEl = { value: 'New', trim: () => 'New' };
+      const cmdEl = { value: 'power status', trim: () => 'power status' };
+      const descEl = { value: '', trim: () => '' };
+      const categoryEl = { value: 'onetree' };
+      document.getElementById = jest.fn((id) => {
+        if (id === 'fav-name') return nameEl;
+        if (id === 'fav-command') return cmdEl;
+        if (id === 'fav-desc') return descEl;
+        if (id === 'fav-category') return categoryEl;
+        return createMockEl(id);
+      });
+
+      await favorites.save();
+      expect(configStore.getConfig().favorites[0].category).toBe('onetree');
+    });
+  });
+
+  // ========== 导入 / 导出 ==========
+
+  describe('parseFavoritesFile', () => {
+    test('应解析标准导出格式', () => {
+      const result = favorites.parseFavoritesFile(JSON.stringify({
+        favorites: [{ name: 'A', command: 'cmd', desc: 'd', category: 'AMI' }]
+      }));
+      expect(result.ok).toBe(true);
+      expect(result.favorites[0]).toEqual({ name: 'A', command: 'cmd', desc: 'd', category: 'AMI' });
+    });
+
+    test('应兼容裸数组格式', () => {
+      const result = favorites.parseFavoritesFile(JSON.stringify([{ name: 'A', command: 'cmd' }]));
+      expect(result.ok).toBe(true);
+      expect(result.favorites[0].category).toBe('');
+    });
+
+    test('非法 JSON 应报错', () => {
+      const result = favorites.parseFavoritesFile('not json');
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('JSON');
+    });
+
+    test('缺少 favorites 数组应报错', () => {
+      const result = favorites.parseFavoritesFile(JSON.stringify({ data: [] }));
+      expect(result.ok).toBe(false);
+    });
+
+    test('应过滤无效条目并归一化未知分类', () => {
+      const result = favorites.parseFavoritesFile(JSON.stringify({
+        favorites: [
+          { name: 'A', command: 'cmd', category: 'unknown-vendor' },
+          { name: '', command: 'cmd' },
+          { name: 'C' },
+          null
+        ]
+      }));
+      expect(result.ok).toBe(true);
+      expect(result.favorites).toHaveLength(1);
+      expect(result.favorites[0].category).toBe('');
+    });
+
+    test('全部无效时应报错', () => {
+      const result = favorites.parseFavoritesFile(JSON.stringify({ favorites: [{ name: 'X' }] }));
+      expect(result.ok).toBe(false);
+    });
+  });
+
+  describe('mergeFavorites', () => {
+    test('应按名称+命令去重', () => {
+      const existing = [{ name: 'A', command: 'cmd' }];
+      const merged = favorites.mergeFavorites(existing, [
+        { name: 'A', command: 'cmd' },
+        { name: 'B', command: 'cmd2' }
+      ]);
+      expect(merged.added).toBe(1);
+      expect(merged.list.map(f => f.name)).toEqual(['A', 'B']);
+    });
+
+    test('不同分类的同名命令视为不同收藏', () => {
+      const merged = favorites.mergeFavorites(
+        [{ name: 'A', command: 'cmd', category: 'AMI' }],
+        [{ name: 'A', command: 'cmd', category: 'onetree' }]
+      );
+      expect(merged.added).toBe(1);
+    });
+
+    test('不应修改原数组', () => {
+      const existing = [{ name: 'A', command: 'cmd' }];
+      favorites.mergeFavorites(existing, [{ name: 'B', command: 'cmd2' }]);
+      expect(existing).toHaveLength(1);
+    });
+  });
+
+  describe('exportFavorites', () => {
+    const restoreDocument = () => {
+      document.getElementById = jest.fn((id) => {
+        if (!mockElements[id]) mockElements[id] = createMockEl(id);
+        return mockElements[id];
+      });
+    };
+
+    test('无收藏时应提示而不调用保存', async () => {
+      restoreDocument();
+      configStore.getConfig().favorites = [];
+      favorites.loadFavorites();
+
+      await favorites.exportFavorites();
+      expect(safeAlert).toHaveBeenCalledWith('没有可导出的收藏');
+      expect(ipcRenderer.invoke).not.toHaveBeenCalled();
+    });
+
+    test('应带 JSON 过滤器并输出分类字段', async () => {
+      restoreDocument();
+      configStore.getConfig().favorites = [
+        { name: 'A', command: 'cmd', desc: '', category: 'onetree' }
+      ];
+      favorites.loadFavorites();
+
+      ipcRenderer.invoke.mockResolvedValueOnce({ success: true });
+      await favorites.exportFavorites();
+
+      const call = ipcRenderer.invoke.mock.calls[0];
+      expect(call[0]).toBe('file:save');
+      expect(call[1]).toMatch(/ipmi_favorites_.*\.json$/);
+      expect(JSON.parse(call[2]).favorites[0].category).toBe('onetree');
+      expect(call[3][0].extensions).toContain('json');
+    });
+  });
+
+  describe('importFavorites', () => {
+    const fs = require('fs');
+    const { showStatus } = require('../src/modules/utils');
+
+    const restoreDocument = () => {
+      document.getElementById = jest.fn((id) => {
+        if (!mockElements[id]) mockElements[id] = createMockEl(id);
+        return mockElements[id];
+      });
+    };
+
+    test('未选择文件时应直接返回', async () => {
+      restoreDocument();
+      ipcRenderer.invoke.mockResolvedValueOnce(null);
+      await favorites.importFavorites();
+      expect(safeConfirm).not.toHaveBeenCalled();
+    });
+
+    test('合并导入并持久化', async () => {
+      restoreDocument();
+      configStore.getConfig().favorites = [{ name: 'A', command: 'cmd' }];
+      favorites.loadFavorites();
+
+      ipcRenderer.invoke.mockResolvedValueOnce('/tmp/fav.json');
+      fs.readFileSync.mockReturnValueOnce(JSON.stringify({
+        favorites: [
+          { name: 'A', command: 'cmd' },
+          { name: 'B', command: 'cmd2', category: 'AMI' }
+        ]
+      }));
+
+      await favorites.importFavorites();
+
+      const saved = configStore.getConfig().favorites;
+      expect(saved.map(f => f.name)).toEqual(['A', 'B']);
+      expect(saved[1].category).toBe('AMI');
+      expect(configStore.saveConfig).toHaveBeenCalled();
+      expect(showStatus).toHaveBeenCalledWith('connected', '已导入 1 条收藏');
+    });
+
+    test('用户取消时不写入', async () => {
+      restoreDocument();
+      configStore.getConfig().favorites = [];
+      favorites.loadFavorites();
+      configStore.saveConfig.mockClear();
+
+      ipcRenderer.invoke.mockResolvedValueOnce('/tmp/fav.json');
+      fs.readFileSync.mockReturnValueOnce(JSON.stringify({ favorites: [{ name: 'B', command: 'cmd2' }] }));
+      safeConfirm.mockResolvedValueOnce(false);
+
+      await favorites.importFavorites();
+      expect(configStore.saveConfig).not.toHaveBeenCalled();
+    });
+
+    test('格式错误时应提示', async () => {
+      restoreDocument();
+      ipcRenderer.invoke.mockResolvedValueOnce('/tmp/fav.json');
+      fs.readFileSync.mockReturnValueOnce('broken');
+
+      await favorites.importFavorites();
+      expect(safeAlert).toHaveBeenCalledWith(expect.stringContaining('导入失败'));
+    });
+
+    test('读取文件异常时应提示', async () => {
+      restoreDocument();
+      ipcRenderer.invoke.mockResolvedValueOnce('/tmp/fav.json');
+      fs.readFileSync.mockImplementationOnce(() => { throw new Error('EACCES'); });
+
+      await favorites.importFavorites();
+      expect(safeAlert).toHaveBeenCalledWith('导入失败: EACCES');
     });
   });
 });

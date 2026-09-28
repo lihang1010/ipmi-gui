@@ -112,6 +112,7 @@ body {
   align-items: center;
   gap: var(--space-sm);
   -webkit-app-region: no-drag;
+  flex-shrink: 0;   /* 不参与压缩，压缩压力交给右侧徽标 */
 }
 
 .toolbar-left label {
@@ -120,6 +121,7 @@ body {
   font-weight: 500;
   letter-spacing: 0.3px;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .toolbar-left select {
@@ -133,6 +135,8 @@ body {
   font-size: 13px;
   font-family: var(--font-sans);
   min-width: 220px;
+  max-width: 240px;   /* 服务器名过长时不撑破工具栏 */
+  text-overflow: ellipsis;
   cursor: pointer;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239d9da5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
@@ -155,6 +159,7 @@ body {
   align-items: center;
   gap: var(--space-md);
   -webkit-app-region: no-drag;
+  min-width: 0;     /* 允许收缩，配合状态徽标内的省略号 */
 }
 
 /* Status indicator */
@@ -169,15 +174,27 @@ body {
   background: var(--bg-overlay);
   color: var(--text-muted);
   transition: all var(--transition-normal);
+  white-space: nowrap;
+  max-width: 260px;
+  min-width: 0;   /* 作为 flex 项需允许收缩，否则内层省略号不生效 */
 }
 
 .status-badge::before {
   content: '';
+  flex-shrink: 0;
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--text-muted);
   transition: background var(--transition-normal);
+}
+
+/* 状态文本过长时省略，避免把工具栏撑到换行 */
+.status-badge .badge-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .status-badge.connected {
@@ -212,10 +229,13 @@ body {
   background: var(--bg-overlay);
   color: var(--text-muted);
   transition: all var(--transition-normal);
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .memory-badge::before {
   content: '';
+  flex-shrink: 0;
   width: 6px;
   height: 6px;
   border-radius: 50%;
@@ -267,7 +287,7 @@ body {
 }
 
 .favorites-list {
-  width: 280px;
+  width: 320px;
   min-width: 200px;
   background: var(--bg-surface);
   border-right: 1px solid var(--border-subtle);
@@ -328,6 +348,24 @@ body {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.favorite-item .fav-category {
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--accent);
+  background: var(--accent-subtle);
+  border: 1px solid rgba(91, 155, 213, 0.3);
+  white-space: nowrap;
+}
+
+.favorite-item .fav-category.general {
+  color: var(--text-muted);
+  background: var(--bg-overlay);
+  border-color: var(--border-subtle);
 }
 
 .favorites-empty {
@@ -1081,12 +1119,18 @@ body.dialog-open .xterm-helper-textarea {
   position: relative;
 }
 
+/* 提示统一向下弹出（top: 100% + 6px）：
+   - 顶部工具栏贴着窗口顶边，向上弹出会被窗口裁掉；
+   - 面板内 (.panel 有 overflow: hidden) 向上弹出会被面板顶边裁掉。
+   z-index 需高于 .tab::after 的下划线，避免提示被压在下划线之下。 */
 [data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
-  bottom: calc(100% + 6px);
+  top: calc(100% + 6px);
+  bottom: auto;
   left: 50%;
   transform: translateX(-50%);
+  z-index: 100;
   padding: 4px 8px;
   background: var(--bg-overlay);
   color: var(--text-primary);
@@ -1102,6 +1146,26 @@ body.dialog-open .xterm-helper-textarea {
 
 [data-tooltip]:hover::after {
   opacity: 1;
+}
+
+/* 注意：<select>/<input> 是替换元素，::after 不渲染，提示需挂在相邻 label 上 */
+
+/* 靠左/靠右的元素分别用左对齐、右对齐弹出，避免水平方向超出容器被裁切 */
+[data-tooltip-align="left"]::after {
+  left: 0;
+  transform: none;
+}
+
+[data-tooltip-align="right"]::after {
+  right: 0;
+  left: auto;
+  transform: none;
+}
+
+/* 多行提示（如内存明细），保留 \n 换行 */
+[data-tooltip-multiline]::after {
+  white-space: pre;
+  text-align: left;
 }
 
 /* --- Empty State --- */
@@ -1123,4 +1187,36 @@ body.dialog-open .xterm-helper-textarea {
 /* --- Selection --- */
 ::selection {
   background: rgba(91, 155, 213, 0.3);
+}
+
+/* ============================================
+   窄窗口适配（窗口 minWidth 为 800px）
+   压缩顶部工具栏，避免标签/徽标换行与按钮文字折行
+   ============================================ */
+@media (max-width: 980px) {
+  .toolbar {
+    padding: var(--space-sm) var(--space-md);
+  }
+
+  .toolbar-left label {
+    display: none;
+  }
+
+  .toolbar-left select {
+    min-width: 140px;
+    max-width: 140px;
+  }
+
+  .toolbar-right {
+    gap: var(--space-sm);
+  }
+
+  .memory-badge,
+  .status-badge {
+    padding: 3px 8px;
+  }
+
+  .status-badge {
+    max-width: 200px;
+  }
 }

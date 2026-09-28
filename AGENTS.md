@@ -221,7 +221,7 @@ fullScan 扫整个 /24 网段需 30s 超时。
 | 面板 | data-tab | 关键方法 |
 |------|----------|---------|
 | SOL 终端 | sol | startSol(), stopSol(), addSolTab() |
-| 收藏夹 | favorites | favorites.execute(), favorites.select() |
+| 收藏夹 | favorites | favorites.execute(), favorites.select(), favorites.setCategoryFilter(), favorites.importFavorites() |
 | 网络扫描 | scan | scanner.fullScan(), addSingleScanResult() |
 | 电源 | power | executePower(action) |
 | 传感器 | sensor | executeSensor() |
@@ -239,4 +239,5 @@ fullScan 扫整个 /24 网段需 30s 超时。
 2. **新增面板**：index.html 加 tab+panel -> renderer.js bindEvents 加事件
 3. **新增扫描端口**：networkScanner.js fullScan() 中 portTargets 数组加条目
 4. **新增凭据**：src/config/ipmi-credentials.json 加模板
-5. **CSS 主题**：style.css :root 下已有 60+ 变量，遵循现有命名
+5. **新增收藏分类**：src/modules/favorites.js 的 `FAVORITE_CATEGORIES`（编辑下拉与筛选下拉会自动同步；收藏项 category 为空视为"通用"）
+6. **CSS 主题**：style.css :root 下已有 60+ 变量，遵循现有命名

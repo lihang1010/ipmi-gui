@@ -25,7 +25,11 @@ function showStatus(state = 'idle', text = '') {
   badge.className = 'status-badge';
   if (state === 'connected') badge.classList.add('connected');
   else if (state === 'error') badge.classList.add('error');
-  badge.textContent = text || '未连接';
+
+  // 文本走内层元素，长度过长时由 CSS 省略号截断（不再撑宽工具栏）
+  const label = badge.querySelector ? badge.querySelector('.badge-text') : null;
+  if (label) label.textContent = text || '未连接';
+  else badge.textContent = text || '未连接';
 }
 
 /**
