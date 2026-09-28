@@ -91,7 +91,7 @@
         <div class="dialog">
           <div class="dialog-header">
             <h3 id="fav-dialog-title">添加收藏</h3>
-            <button class="dialog-close" onclick="closeFavDialog()">&times;</button>
+            <button class="dialog-close" id="fav-dialog-close">&times;</button>
           </div>
           <div class="dialog-body">
             <div class="form-group">
@@ -108,8 +108,8 @@
             </div>
           </div>
           <div class="dialog-footer">
-            <button class="btn" onclick="closeFavDialog()">取消</button>
-            <button class="btn btn-primary" onclick="saveFavorite()">确定</button>
+            <button class="btn" id="fav-cancel">取消</button>
+            <button class="btn btn-primary" id="fav-save">确定</button>
           </div>
         </div>
       </div>
@@ -239,12 +239,12 @@
     <div class="dialog">
       <div class="dialog-header">
         <h3 id="dialog-title">添加服务器</h3>
-        <button class="dialog-close" onclick="closeDialog()">&times;</button>
+        <button class="dialog-close" id="server-dialog-close">&times;</button>
       </div>
       <div class="dialog-body">
         <div class="form-group">
           <label>快速填充模板</label>
-          <select id="server-template" onchange="applyTemplate()">
+          <select id="server-template">
             <option value="">-- 选择模板 --</option>
             <option value="openubmc">openUBMC (Administrator / ttytty`12)</option>
             <option value="ami">AMI (admin / admin)</option>
@@ -284,8 +284,8 @@
         </div>
       </div>
       <div class="dialog-footer">
-        <button class="btn" onclick="closeDialog()">取消</button>
-        <button class="btn btn-primary" onclick="saveServer()">确定</button>
+        <button class="btn" id="server-cancel">取消</button>
+        <button class="btn btn-primary" id="server-save">确定</button>
       </div>
     </div>
   </div>

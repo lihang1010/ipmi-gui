@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
 const { buildArgs, resolveIpmiToolPath, tokenizeCommand } = require('./src/modules/ipmiTool');
+const { getLocalNetwork, cidrToHosts, fullScan, stopScan } = require('./src/modules/networkScanner');
 
 // 过滤 stderr 中的缓存警告日志
 const originalStderrWrite = process.stderr.write;
@@ -234,6 +235,45 @@ ipcMain.handle('dialog:selectFile', async (event, filters) => {
     return result.filePaths[0];
   }
   return null;
+});
+
+// ========== 网络扫描 ==========
+// 扫描在渲染进程会直接使用 child_process / dgram / net / http，
+// 统一放到主进程执行，渲染层只负责展示与进度。
+
+// 获取本机网段
+ipcMain.handle('scan:getLocalNetwork', () => getLocalNetwork());
+
+// 开始扫描，进度通过 scan:progress 推送
+ipcMain.handle('scan:start', async (event, options = {}) => {
+  const { network, cidr = 24, timeout = 200 } = options || {};
+  if (!network) {
+    return { success: false, error: '缺少网段参数' };
+  }
+
+  try {
+    const results = await fullScan(network, {
+      hosts: cidrToHosts(network, cidr),
+      pingConcurrency: 50,
+      pingTimeout: timeout,
+      portConcurrency: 20,
+      portTimeout: timeout,
+      onProgress: (info) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('scan:progress', info);
+        }
+      }
+    });
+    return { success: true, results };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 停止扫描
+ipcMain.handle('scan:stop', () => {
+  stopScan();
+  return { success: true };
 });
 
 // ========== 生命周期 ==========

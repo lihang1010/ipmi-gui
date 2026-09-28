@@ -166,23 +166,23 @@ jest.mock('../src/modules/favorites', () => ({
   getSelectedIndex: jest.fn().mockReturnValue(-1)
 }));
 
-jest.mock('../src/modules/networkScanner', () => ({
-  getLocalNetwork: jest.fn().mockReturnValue({ subnet: '192.168.1', ip: '192.168.1.100' }),
-  cidrToHosts: jest.fn().mockReturnValue(['192.168.1.1']),
-  fullScan: jest.fn().mockResolvedValue([]),
-  stopScan: jest.fn()
-}));
+// 扫描已移入主进程，渲染层只通过 scan:* IPC 交互，无需 mock scanner 模块
+
+// 加载 renderer.js（模块级代码在此执行），并抓取 DOMContentLoaded 回调
+// 注意：必须在 beforeEach 的 jest.clearAllMocks() 之前抓取
+require('../src/renderer');
+const domReadyHandlers = document.addEventListener.mock.calls
+  .filter(call => call[0] === 'DOMContentLoaded')
+  .map(call => call[1]);
 
 // ========== Test Suite ==========
 
 describe('Renderer Module', () => {
-  let renderer;
   const { ipcRenderer } = require('electron');
   const configStore = require('../src/modules/configStore');
   const { safeAlert, safeConfirm } = require('../src/modules/modal');
   const commandRunner = require('../src/modules/commandRunner');
   const favorites = require('../src/modules/favorites');
-  const scanner = require('../src/modules/networkScanner');
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -532,23 +532,42 @@ describe('Renderer Module', () => {
     });
   });
 
-  describe('Network Scan', () => {
-    test('should start scan with subnet', async () => {
-      scanner.fullScan.mockResolvedValueOnce([{ ip: '192.168.1.10', latency: 5 }]);
-      const results = await scanner.fullScan('192.168.1', { pingConcurrency: 50 });
-      expect(results).toHaveLength(1);
-      expect(results[0].ip).toBe('192.168.1.10');
+  describe('Network Scan (主进程 IPC)', () => {
+    test('should request scan via scan:start', async () => {
+      ipcRenderer.invoke.mockResolvedValueOnce({
+        success: true,
+        results: [{ ip: '192.168.1.10', latency: 5 }]
+      });
+
+      const result = await ipcRenderer.invoke('scan:start', {
+        network: '192.168.1', cidr: 24, timeout: 200
+      });
+
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('scan:start', {
+        network: '192.168.1', cidr: 24, timeout: 200
+      });
+      expect(result.success).toBe(true);
+      expect(result.results).toHaveLength(1);
     });
 
-    test('should stop scan', () => {
-      scanner.stopScan();
-      expect(scanner.stopScan).toHaveBeenCalled();
+    test('should stop scan via scan:stop', async () => {
+      ipcRenderer.invoke.mockResolvedValueOnce({ success: true });
+      await ipcRenderer.invoke('scan:stop');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('scan:stop');
     });
 
-    test('should get local network', () => {
-      const local = scanner.getLocalNetwork();
-      expect(local).toBeDefined();
+    test('should get local network via scan:getLocalNetwork', async () => {
+      ipcRenderer.invoke.mockResolvedValueOnce({ subnet: '192.168.1', ip: '192.168.1.100' });
+      const local = await ipcRenderer.invoke('scan:getLocalNetwork');
       expect(local.subnet).toBe('192.168.1');
+    });
+
+    test('should register scan:progress listener on DOMContentLoaded', () => {
+      expect(domReadyHandlers.length).toBeGreaterThan(0);
+
+      domReadyHandlers.forEach(handler => handler());
+
+      expect(ipcRenderer.on).toHaveBeenCalledWith('scan:progress', expect.any(Function));
     });
   });
 
@@ -589,18 +608,23 @@ describe('Renderer Module', () => {
     });
   });
 
-  describe('Window Exports', () => {
-    test('should export functions to window', () => {
-      expect(window.applyTemplate).toBeDefined();
-      expect(window.updateServerNameFromTemplate).toBeDefined();
-      expect(window.openDialog).toBeDefined();
-      expect(window.closeDialog).toBeDefined();
-      expect(window.saveServer).toBeDefined();
-      expect(window.selectFavorite).toBeDefined();
-      expect(window.executeFavorite).toBeDefined();
-      expect(window.closeFavDialog).toBeDefined();
-      expect(window.saveFavorite).toBeDefined();
-      expect(window.updateServerList).toBeDefined();
+  describe('全局挂载与内联事件', () => {
+    const readSource = (relative) => require('fs').readFileSync(
+      require('path').join(__dirname, '..', relative), 'utf-8'
+    );
+
+    test('renderer.js 不应再向 window 挂载业务函数', () => {
+      expect(readSource('src/renderer.js')).not.toMatch(/^window\.\w+ = /m);
+    });
+
+    test('index.html 不应再有内联 onclick/onchange 处理器', () => {
+      const html = readSource('src/index.html');
+      expect(html).not.toMatch(/\son(click|change|input)=/);
+    });
+
+    test('renderer.js 生成的标签/行 HTML 不应包含内联 onclick', () => {
+      const source = readSource('src/renderer.js');
+      expect(source).not.toMatch(/onclick=\\?"/);
     });
   });
 });

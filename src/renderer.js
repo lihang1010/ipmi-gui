@@ -11,10 +11,9 @@ const { SerializeAddon } = require('@xterm/addon-serialize');
 const { loadConfig, saveConfig, getConfig } = require('./modules/configStore');
 const { safeAlert, safeConfirm } = require('./modules/modal');
 const { escapeHtml, showStatus, clearOutput, isValidIP } = require('./modules/utils');
-const { SERVER_TEMPLATES, applyTemplate, updateServerNameFromTemplate } = require('./modules/templates');
+const { SERVER_TEMPLATES, applyTemplate } = require('./modules/templates');
 const { executeCommand, executePower, executeSensor, executeRawCommand } = require('./modules/commandRunner');
 const favorites = require('./modules/favorites');
-const scanner = require('./modules/networkScanner');
 const { renderScanResultRow } = require('./modules/scanResultView');
 const { getCredentialByName } = require('./modules/credentials');
 
@@ -42,6 +41,11 @@ document.addEventListener('DOMContentLoaded', () => {
   bindKeyboardShortcuts();
   initScan();
   initMemoryMonitor();
+
+  // 扫描进度（主进程推送）
+  ipcRenderer.on('scan:progress', (event, info) => {
+    updateScanProgress(info);
+  });
 
   // SOL IPC 监听
   ipcRenderer.on('sol:data', (event, { tabId, data }) => {
@@ -139,17 +143,24 @@ function addSolTab(server = null) {
 
 function renderSolTabs() {
   const list = document.getElementById('sol-tab-list');
-  list.innerHTML = solTabs.map(tab => `
-    <div class="sol-tab ${tab.id === activeTabId ? 'active' : ''}" data-tab-id="${tab.id}">
-      <span class="sol-tab-name">${tab.name}</span>
-      <button class="sol-tab-close" onclick="event.stopPropagation(); closeSolTab('${tab.id}')">&times;</button>
-    </div>
-  `).join('');
+  list.innerHTML = solTabs.map(tab =>
+    '<div class="sol-tab ' + (tab.id === activeTabId ? 'active' : '') + '" data-tab-id="' + tab.id + '">' +
+      '<span class="sol-tab-name">' + escapeHtml(tab.name) + '</span>' +
+      '<button class="sol-tab-close" data-tab-close="' + tab.id + '">&times;</button>' +
+    '</div>'
+  ).join('');
 
-  // 绑定点击事件
-  list.querySelectorAll('.sol-tab').forEach(el => {
-    el.addEventListener('click', () => switchSolTab(el.dataset.tabId));
-  });
+  // 事件委托：关闭按钮与标签切换（不依赖内联 onclick）
+  list.onclick = (e) => {
+    const closeBtn = e.target.closest ? e.target.closest('.sol-tab-close') : null;
+    if (closeBtn) {
+      e.stopPropagation();
+      closeSolTab(closeBtn.dataset.tabClose);
+      return;
+    }
+    const tabEl = e.target.closest ? e.target.closest('.sol-tab') : null;
+    if (tabEl) switchSolTab(tabEl.dataset.tabId);
+  };
 
   // 更新按钮状态
   updateSolButtons();
@@ -307,6 +318,15 @@ function bindEvents() {
   document.getElementById('btn-test-connection').addEventListener('click', testConnection);
   document.getElementById('btn-import-config').addEventListener('click', importConfig);
   document.getElementById('btn-export-config').addEventListener('click', exportConfig);
+
+  // 对话框按钮与模板下拉（替代内联 onclick/onchange）
+  document.getElementById('server-dialog-close').addEventListener('click', closeDialog);
+  document.getElementById('server-cancel').addEventListener('click', closeDialog);
+  document.getElementById('server-save').addEventListener('click', saveServer);
+  document.getElementById('server-template').addEventListener('change', applyTemplate);
+  document.getElementById('fav-dialog-close').addEventListener('click', () => favorites.closeDialog());
+  document.getElementById('fav-cancel').addEventListener('click', () => favorites.closeDialog());
+  document.getElementById('fav-save').addEventListener('click', () => favorites.save());
 
   // SOL 按钮
   document.getElementById('btn-sol-start').addEventListener('click', startSol);
@@ -750,11 +770,15 @@ let scanResults = [];
 let lastScanRenderAt = 0;
 let lastScanRenderPhase = '';
 
-function initScan() {
-  // 自动填充本机网段
-  const local = scanner.getLocalNetwork();
-  if (local) {
-    document.getElementById('scan-subnet').value = local.subnet;
+async function initScan() {
+  // 自动填充本机网段（由主进程读取网卡信息）
+  try {
+    const local = await ipcRenderer.invoke('scan:getLocalNetwork');
+    if (local && local.subnet) {
+      document.getElementById('scan-subnet').value = local.subnet;
+    }
+  } catch (e) {
+    // 获取失败时留空由用户填写
   }
 
   // 绑定事件
@@ -798,7 +822,7 @@ async function updateMemoryInfo() {
   }
 }
 
-function startScan() {
+async function startScan() {
   const subnet = document.getElementById('scan-subnet').value.trim();
   const cidr = parseInt(document.getElementById('scan-cidr').value) || 24;
   const timeout = parseInt(document.getElementById('scan-timeout').value) || 200;
@@ -814,9 +838,6 @@ function startScan() {
     return;
   }
 
-  // 按 CIDR 展开待扫描主机（/24 ~ /30，低于 /24 按 /24 处理）
-  const hosts = scanner.cidrToHosts(network, cidr);
-
   // 更新UI状态
   document.getElementById('btn-scan-start').disabled = true;
   document.getElementById('btn-scan-stop').disabled = false;
@@ -825,26 +846,28 @@ function startScan() {
   lastScanRenderAt = 0;
   lastScanRenderPhase = '';
 
-  // 开始扫描
-  scanner.fullScan(network, {
-    hosts,
-    pingConcurrency: 50,
-    pingTimeout: timeout,
-    portConcurrency: 20,
-    portTimeout: timeout,
-    onProgress: (info) => updateScanProgress(info)
-  }).then(results => {
-    scanResults = results;
-    renderScanResults(results);
-    document.getElementById('btn-scan-start').disabled = false;
-    document.getElementById('btn-scan-stop').disabled = true;
+  try {
+    // CIDR 展开与扫描均在主进程执行，进度经 scan:progress 推送
+    const result = await ipcRenderer.invoke('scan:start', { network, cidr, timeout });
+    if (!result.success) {
+      await safeAlert('扫描失败: ' + result.error);
+      return;
+    }
+
+    scanResults = result.results || [];
+    renderScanResults(scanResults);
     document.getElementById('scan-phase').textContent = '扫描完成';
     document.getElementById('scan-progress-bar').style.width = '100%';
-  });
+  } catch (err) {
+    await safeAlert('扫描异常: ' + err.message);
+  } finally {
+    document.getElementById('btn-scan-start').disabled = false;
+    document.getElementById('btn-scan-stop').disabled = true;
+  }
 }
 
 function stopScan() {
-  scanner.stopScan();
+  ipcRenderer.invoke('scan:stop').catch(() => {});
   document.getElementById('btn-scan-start').disabled = false;
   document.getElementById('btn-scan-stop').disabled = true;
   document.getElementById('scan-phase').textContent = '已停止';
@@ -1026,15 +1049,5 @@ async function exportScanResults() {
   }
 }
 
-// ========== 导出给 HTML 使用 ==========
-window.applyTemplate = applyTemplate;
-window.updateServerNameFromTemplate = updateServerNameFromTemplate;
-window.openDialog = openDialog;
-window.closeDialog = closeDialog;
-window.saveServer = saveServer;
-window.selectFavorite = favorites.select;
-window.executeFavorite = (index) => favorites.execute(index, getCurrentServer());
-window.closeFavDialog = favorites.closeDialog;
-window.saveFavorite = favorites.save;
-window.batchDeleteServer = batchDeleteServer;
-window.updateServerList = updateServerList;
+// HTML 中的交互统一通过 bindEvents() 里的 addEventListener 绑定，
+// 不再向 window 挂载函数（避免内联事件与全局污染）
