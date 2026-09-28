@@ -216,12 +216,88 @@ describe('NetworkScanner Module', () => {
       await scanner.pingHost('192.168.1.1', 200);
       Object.defineProperty(process, 'platform', { value: originalPlatform });
     });
+
+    test('should pass millisecond timeout on Windows', async () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+
+      const { exec } = require('child_process');
+      let captured = '';
+      exec.mockImplementationOnce((cmd, opts, cb) => {
+        captured = cmd;
+        cb(null, '', '');
+        return { on: jest.fn() };
+      });
+
+      await scanner.pingHost('192.168.1.1', 500);
+      expect(captured).toContain('-w 500');
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
   });
 
   describe('scanPort', () => {
     test('should return true when port is open', async () => {
       const result = await scanner.scanPort('192.168.1.1', 623, 300);
       expect(result).toBe(true);
+    });
+
+    test('should send ASF Presence Ping packet', async () => {
+      const dgram = require('dgram');
+      const socket = {
+        send: jest.fn(),
+        close: jest.fn(),
+        on: jest.fn((event, cb) => {
+          if (event === 'message') setTimeout(() => cb(Buffer.from([0x06])), 5);
+        })
+      };
+      dgram.createSocket.mockReturnValueOnce(socket);
+
+      const result = await scanner.scanPort('192.168.1.1', 623, 100);
+      expect(result).toBe(true);
+
+      const packet = socket.send.mock.calls[0][0];
+      expect(packet[0]).toBe(0x06); // RMCP version
+      expect(packet[3]).toBe(0x07); // ASF class
+      expect(packet[8]).toBe(0x80); // Presence Ping
+    });
+
+    test('should return false on UDP timeout (no false positive)', async () => {
+      const dgram = require('dgram');
+      dgram.createSocket.mockReturnValueOnce({
+        send: jest.fn(),
+        close: jest.fn(),
+        on: jest.fn() // 不触发任何事件
+      });
+
+      const result = await scanner.scanPort('192.168.1.1', 623, 30);
+      expect(result).toBe(false);
+    });
+  });
+
+  describe('cidrToHosts', () => {
+    test('should expand /24 to 254 hosts', () => {
+      const hosts = scanner.cidrToHosts('192.168.1', 24);
+      expect(hosts).toHaveLength(254);
+      expect(hosts[0]).toBe('192.168.1.1');
+      expect(hosts[253]).toBe('192.168.1.254');
+    });
+
+    test('should expand /25 to 126 hosts', () => {
+      expect(scanner.cidrToHosts('192.168.1', 25)).toHaveLength(126);
+    });
+
+    test('should expand /30 to 2 usable hosts', () => {
+      expect(scanner.cidrToHosts('192.168.1', 30)).toEqual(['192.168.1.1', '192.168.1.2']);
+    });
+
+    test('should clamp prefixes lower than /24 to /24', () => {
+      expect(scanner.cidrToHosts('192.168.1', 16)).toHaveLength(254);
+    });
+
+    test('should default to /24 when cidr is invalid', () => {
+      expect(scanner.cidrToHosts('192.168.1')).toHaveLength(254);
+      expect(scanner.cidrToHosts('192.168.1', 'abc')).toHaveLength(254);
     });
   });
 
@@ -287,6 +363,21 @@ describe('NetworkScanner Module', () => {
         }
       });
       expect(phases).toContain('ping');
+    }, 30000);
+
+    test('should scan explicit host list when hosts provided', async () => {
+      const onProgress = jest.fn();
+      const result = await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1', '192.168.1.2'],
+        pingConcurrency: 2,
+        pingTimeout: 50,
+        portConcurrency: 2,
+        portTimeout: 50,
+        onProgress
+      });
+
+      expect(Array.isArray(result)).toBe(true);
+      expect(onProgress.mock.calls[0][0].total).toBe(2);
     }, 30000);
   });
 

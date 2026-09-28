@@ -5,6 +5,7 @@
 const { exec } = require('child_process');
 const net = require('net');
 const os = require('os');
+const { resolveIpmiToolPath } = require('./ipmiTool');
 
 let scanState = {
   running: false,
@@ -42,12 +43,16 @@ function getLocalNetwork() {
  */
 function pingHost(ip, timeout = 200) {
   return new Promise((resolve) => {
-    const flag = process.platform === 'win32' ? '-n' : '-c';
-    const timeoutFlag = process.platform === 'win32' ? '-w' : '-W';
-    const timeoutSec = Math.max(1, Math.ceil(timeout / 1000));
+    const isWindows = process.platform === 'win32';
+    const flag = isWindows ? '-n' : '-c';
+    const timeoutFlag = isWindows ? '-w' : '-W';
+    // Windows 的 -w 单位为毫秒，Linux 的 -W 单位为秒
+    const timeoutValue = isWindows
+      ? Math.max(1, Math.round(timeout))
+      : Math.max(1, Math.ceil(timeout / 1000));
 
     const proc = exec(
-      `ping ${flag} 1 ${timeoutFlag} ${timeoutSec} ${ip}`,
+      `ping ${flag} 1 ${timeoutFlag} ${timeoutValue} ${ip}`,
       { timeout: timeout + 500, windowsHide: true },
       (error) => {
         resolve(!error);
@@ -66,27 +71,32 @@ function scanPort(ip, port = 623, timeout = 300) {
     const dgram = require('dgram');
     const socket = dgram.createSocket('udp4');
 
-    const timer = setTimeout(() => {
-      socket.close();
-      // UDP 超时 - IPMI 可能不响应未知数据包
-      // 但设备可能在线，标记为潜在设备
-      resolve(true);
-    }, timeout);
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      try { socket.close(); } catch (e) {}
+      resolve(result);
+    };
 
-    socket.on('message', (msg, rinfo) => {
+    const timer = setTimeout(() => done(false), timeout);
+
+    socket.on('message', () => {
       clearTimeout(timer);
-      socket.close();
-      resolve(true);
+      done(true);
     });
 
     socket.on('error', () => {
       clearTimeout(timer);
-      socket.close();
-      resolve(false);
+      done(false);
     });
 
-    // 发送 RMCP 探测包
-    const rmcpPacket = Buffer.from([0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x61, 0x00]);
+    // RMCP Presence Ping (ASF): 06 00 00 07 | 00 00 11 BE | 80 00 00 00
+    const rmcpPacket = Buffer.from([
+      0x06, 0x00, 0x00, 0x07,
+      0x00, 0x00, 0x11, 0xBE,
+      0x80, 0x00, 0x00, 0x00
+    ]);
     socket.send(rmcpPacket, 0, rmcpPacket.length, port, ip);
   });
 }
@@ -202,24 +212,41 @@ async function runWithLimit(tasks, limit, onItemDone) {
 }
 
 /**
- * Ping 扫描网段
+ * 将"网段前缀 + CIDR"展开为主机列表
+ * 仅在最后一个八位组内划分，支持 /24 ~ /30；小于 /24 按 /24 处理
+ * @param {string} prefix 前三段，如 192.168.1
+ * @param {number} cidr 24 ~ 30
+ * @returns {string[]} 主机 IP 列表
  */
-async function pingScan(subnet, options = {}) {
+function cidrToHosts(prefix, cidr = 24) {
+  const parsed = parseInt(cidr, 10);
+  const bits = Math.min(30, Math.max(24, isNaN(parsed) ? 24 : parsed));
+  const blockSize = Math.pow(2, 32 - bits);
+  const hostCount = Math.min(254, blockSize - 2);
+
+  const hosts = [];
+  for (let i = 1; i <= hostCount; i++) {
+    hosts.push(`${prefix}.${i}`);
+  }
+  return hosts;
+}
+
+/**
+ * Ping 扫描
+ * @param {string|string[]} subnetOrHosts 网段前缀（兼容旧调用）或显式主机列表
+ */
+async function pingScan(subnetOrHosts, options = {}) {
   const { concurrency = 30, timeout = 300, onProgress } = options;
-  const alive = [];
+  const ips = Array.isArray(subnetOrHosts) ? subnetOrHosts : cidrToHosts(subnetOrHosts, 24);
   let current = 0;
-  const total = 254;
+  const total = ips.length;
 
   scanState = { running: true, stopped: false, results: [], current: 0, total, phase: 'ping' };
 
-  const tasks = [];
-  for (let i = 1; i <= total; i++) {
-    const ip = `${subnet}.${i}`;
-    tasks.push(async () => {
-      const isAlive = await pingHost(ip, timeout);
-      return isAlive ? ip : null;
-    });
-  }
+  const tasks = ips.map(ip => async () => {
+    const isAlive = await pingHost(ip, timeout);
+    return isAlive ? ip : null;
+  });
 
   const results = await runWithLimit(tasks, concurrency, (i, total, results) => {
     current = i + 1;
@@ -276,15 +303,18 @@ async function fullScan(subnet, options = {}) {
     pingTimeout = 300,
     portConcurrency = 10,
     portTimeout = 300,
+    hosts = null,
     onProgress
   } = options;
 
-  scanState = { running: true, stopped: false, results: [], current: 0, total: 254, phase: 'ping' };
+  const targetHosts = (hosts && hosts.length) ? hosts : cidrToHosts(subnet, 24);
+
+  scanState = { running: true, stopped: false, results: [], current: 0, total: targetHosts.length, phase: 'ping' };
 
   // 第一步：Ping 扫描
-  if (onProgress) onProgress({ phase: 'ping', current: 0, total: 254, found: [] });
+  if (onProgress) onProgress({ phase: 'ping', current: 0, total: targetHosts.length, found: [] });
 
-  const alive = await pingScan(subnet, {
+  const alive = await pingScan(targetHosts, {
     concurrency: pingConcurrency,
     timeout: pingTimeout,
     onProgress: (current, total, found) => {
@@ -450,21 +480,10 @@ async function verifyIPMITemplate(ip, timeout = 1500) {
  */
 async function verifyIPMI(ip, username, password, timeout = 1500) {
   return new Promise((resolve) => {
-    const path = require('path');
-    const fs = require('fs');
-
-    const searchPaths = [
-      path.join(__dirname, '..', '..', '..', 'bin', 'ipmitool.exe'),
-      path.join(__dirname, '..', '..', '..', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
-      path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe')
-    ];
-
-    let ipmitoolPath = searchPaths[0];
-    for (const p of searchPaths) {
-      if (fs.existsSync(p)) {
-        ipmitoolPath = p;
-        break;
-      }
+    const ipmitoolPath = resolveIpmiToolPath();
+    if (!ipmitoolPath) {
+      resolve({ success: false, error: '未找到 ipmitool.exe' });
+      return;
     }
 
     const args = [
@@ -516,18 +535,10 @@ async function fetchFruBoardProduct(ip, timeout = 1500) {
   const password = 'ttytty`12';
 
   return new Promise((resolve) => {
-    const path = require('path');
-    const fs = require('fs');
-
-    const searchPaths = [
-      path.join(__dirname, '..', '..', '..', 'bin', 'ipmitool.exe'),
-      path.join(__dirname, '..', '..', '..', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
-      path.join(__dirname, '..', '..', 'bin', 'ipmitool.exe')
-    ];
-
-    let ipmitoolPath = searchPaths[0];
-    for (const p of searchPaths) {
-      if (fs.existsSync(p)) { ipmitoolPath = p; break; }
+    const ipmitoolPath = resolveIpmiToolPath();
+    if (!ipmitoolPath) {
+      resolve(null);
+      return;
     }
 
     const args = [
@@ -573,6 +584,7 @@ function stopScan() {
 
 module.exports = {
   getLocalNetwork,
+  cidrToHosts,
   pingHost,
   scanPort,
   scanTcpPort,

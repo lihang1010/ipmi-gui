@@ -745,6 +745,9 @@ async function selectLogDir() {
 // ========== 网络扫描 ==========
 
 let scanResults = [];
+// 扫描列表重绘限流状态
+let lastScanRenderAt = 0;
+let lastScanRenderPhase = '';
 
 function initScan() {
   // 自动填充本机网段
@@ -804,16 +807,26 @@ function startScan() {
     return;
   }
 
+  const network = subnet.split('.').slice(0, 3).join('.');
+  if (!isValidIP(network + '.1')) {
+    safeAlert('网段格式不正确，每段需在 0-255 之间\n\n示例: 192.168.1.0');
+    return;
+  }
+
+  // 按 CIDR 展开待扫描主机（/24 ~ /30，低于 /24 按 /24 处理）
+  const hosts = scanner.cidrToHosts(network, cidr);
+
   // 更新UI状态
   document.getElementById('btn-scan-start').disabled = true;
   document.getElementById('btn-scan-stop').disabled = false;
   document.getElementById('scan-results').innerHTML = '';
   scanResults = [];
+  lastScanRenderAt = 0;
+  lastScanRenderPhase = '';
 
   // 开始扫描
-  const network = subnet.split('.').slice(0, 3).join('.');
-
   scanner.fullScan(network, {
+    hosts,
     pingConcurrency: 50,
     pingTimeout: timeout,
     portConcurrency: 20,
@@ -846,10 +859,14 @@ function updateScanProgress(info) {
   document.getElementById('scan-progress-text').textContent = `${current}/${total}`;
   document.getElementById('scan-found-count').textContent = `发现: ${found.length}台`;
 
-  console.log(`[PROGRESS] ${phase} ${current}/${total}, found: ${found.length}`, found.map(f => f.ip || f));
-
-  // 实时更新结果
-  renderScanResults(found);
+  // 列表重绘限流（阶段切换立即刷新，其余最多 400ms 一次），
+  // 避免每台设备回调都重建整个列表
+  const now = Date.now();
+  if (phase !== lastScanRenderPhase || now - lastScanRenderAt >= 400) {
+    lastScanRenderPhase = phase;
+    lastScanRenderAt = now;
+    renderScanResults(found);
+  }
 }
 
 function renderScanResults(results) {
@@ -904,7 +921,6 @@ function updateScanButtons() {
   const checkboxes = document.querySelectorAll('.scan-checkbox:checked');
   const btn = document.getElementById('btn-scan-add-selected');
   btn.disabled = checkboxes.length === 0;
-  console.log(`[SCAN] 按钮状态: ${checkboxes.length} 个已选中, 按钮${btn.disabled ? '禁用' : '启用'}`);
 }
 
 function selectAllScanResults() {

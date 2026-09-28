@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
+const { buildArgs, resolveIpmiToolPath, tokenizeCommand } = require('./src/modules/ipmiTool');
 
 // 过滤 stderr 中的缓存警告日志
 const originalStderrWrite = process.stderr.write;
@@ -63,44 +64,13 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, 'src', 'index.html'));
 }
 
-// 构建 ipmitool 参数
-function buildArgs(server) {
-  const args = [];
-  if (server.host) args.push('-H', server.host);
-  if (server.port && server.port !== 623) args.push('-p', String(server.port));
-  if (server.username) args.push('-U', server.username);
-  if (server.password) args.push('-P', server.password);
-  if (server.interface) args.push('-I', server.interface);
-  if (server.cipherSuite) args.push('-C', String(server.cipherSuite));
-  if (server.privilegeLevel) args.push('-L', server.privilegeLevel);
-  return args;
-}
-
-// 获取 ipmitool 路径
+// 获取 ipmitool 路径（未找到返回 null，由调用方给出明确错误）
 function getIpmiToolPath() {
-  const exeDir = path.dirname(app.getPath('exe'));
-
-  // 按优先级查找
-  const searchPaths = [
-    // 1. resources/bin/ipmitool.exe (手动复制)
-    path.join(exeDir, 'resources', 'bin', 'ipmitool.exe'),
-    // 2. resources/app.asar.unpacked/bin/ipmitool.exe
-    path.join(exeDir, 'resources', 'app.asar.unpacked', 'bin', 'ipmitool.exe'),
-    // 3. exe 同级 bin 目录
-    path.join(exeDir, 'bin', 'ipmitool.exe'),
-    // 4. exe 同目录
-    path.join(exeDir, 'ipmitool.exe'),
-    // 5. 开发模式：项目 bin 目录
-    path.join(__dirname, 'bin', 'ipmitool.exe')
-  ];
-
-  for (const p of searchPaths) {
-    if (fs.existsSync(p)) {
-      return p;
-    }
-  }
-  return searchPaths[0];
+  return resolveIpmiToolPath();
 }
+
+// ipmitool 缺失时的统一提示
+const IPMITOOL_MISSING = '未找到 ipmitool.exe，请确认 bin 目录已随程序一起分发';
 
 // ========== IPC 处理 ==========
 
@@ -127,7 +97,12 @@ ipcMain.handle('config:save', (event, config) => {
 // 执行 IPMI 命令
 ipcMain.handle('ipmi:execute', async (event, server, command, args = []) => {
   const ipmitoolPath = getIpmiToolPath();
-  const cmdArgs = [...buildArgs(server), ...command.split(' '), ...args];
+  if (!ipmitoolPath) {
+    return { code: -1, stdout: '', stderr: IPMITOOL_MISSING };
+  }
+
+  // 分词支持引号：例 fru write 0 "Board Mfg"
+  const cmdArgs = [...buildArgs(server), ...tokenizeCommand(command), ...args];
 
   return new Promise((resolve) => {
     const spawn = require('child_process').spawn;
@@ -156,6 +131,10 @@ ipcMain.handle('ipmi:execute', async (event, server, command, args = []) => {
 // 启动 SOL
 ipcMain.handle('sol:start', async (event, server, tabId) => {
   const ipmitoolPath = getIpmiToolPath();
+  if (!ipmitoolPath) {
+    return { success: false, error: IPMITOOL_MISSING };
+  }
+
   const args = [...buildArgs(server), 'sol', 'activate'];
 
   try {
@@ -201,6 +180,8 @@ ipcMain.on('sol:write', (event, tabId, data) => {
 // 停止 SOL - 直接执行 deactivate
 ipcMain.handle('sol:stop', async (event, server) => {
   const ipmitoolPath = getIpmiToolPath();
+  if (!ipmitoolPath) return { success: false, error: IPMITOOL_MISSING };
+
   const args = [...buildArgs(server), 'sol', 'deactivate'];
 
   return new Promise((resolve) => {
@@ -225,6 +206,8 @@ ipcMain.handle('sol:stop', async (event, server) => {
 // 执行 sol deactivate
 ipcMain.handle('sol:deactivate', async (event, server) => {
   const ipmitoolPath = getIpmiToolPath();
+  if (!ipmitoolPath) return { success: false, error: IPMITOOL_MISSING };
+
   const args = [...buildArgs(server), 'sol', 'deactivate'];
 
   return new Promise((resolve) => {
@@ -258,6 +241,9 @@ ipcMain.handle('sol:close', async (event, tabId, server) => {
   if (!server) return { success: true };
 
   const ipmitoolPath = getIpmiToolPath();
+  // 本地 PTY 已回收，仅远端会话无法释放
+  if (!ipmitoolPath) return { success: true, warning: IPMITOOL_MISSING };
+
   const args = [...buildArgs(server), 'sol', 'deactivate'];
 
   return new Promise((resolve) => {

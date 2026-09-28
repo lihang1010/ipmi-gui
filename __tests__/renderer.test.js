@@ -168,6 +168,7 @@ jest.mock('../src/modules/favorites', () => ({
 
 jest.mock('../src/modules/networkScanner', () => ({
   getLocalNetwork: jest.fn().mockReturnValue({ subnet: '192.168.1', ip: '192.168.1.100' }),
+  cidrToHosts: jest.fn().mockReturnValue(['192.168.1.1']),
   fullScan: jest.fn().mockResolvedValue([]),
   stopScan: jest.fn()
 }));
