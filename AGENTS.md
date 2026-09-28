@@ -157,8 +157,10 @@ CIDR 展开主机 (cidrToHosts, /24~/30)
 ## 测试
 
 ```bash
-npm test                  # 全量
-npx jest __tests__/xxx    # 单文件
+npm test                    # 全量
+npx jest __tests__/xxx      # 单文件
+npm run test:coverage       # 带覆盖率
+npm run lint                # ESLint 9 (eslint.config.js)
 ```
 
 - Jest 30，testEnvironment 为 **node**（非 jsdom，DOM 靠手工 mock）
@@ -178,7 +180,8 @@ powershell build.ps1 # 构建
 
 - 需管理员权限运行
 - 解压即用，无安装过程
-- 构建脚本手动复制 bin/ 到 dist
+- `bin/` 由 electron-builder 的 `extraResources` 复制到 `resources/bin`，
+  构建脚本只做存在性校验（不再手动 Copy-Item）
 
 ---
 

@@ -267,7 +267,6 @@ async function pingScan(subnetOrHosts, options = {}) {
  */
 async function portScan(ips, options = {}) {
   const { concurrency = 10, timeout = 300, onProgress } = options;
-  const found = [];
   let current = 0;
   const total = ips.length;
 

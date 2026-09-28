@@ -4,7 +4,6 @@
 
 const { ipcRenderer } = require('electron');
 const { safeAlert } = require('./modal');
-const { showStatus } = require('./utils');
 
 /**
  * 执行 IPMI 命令

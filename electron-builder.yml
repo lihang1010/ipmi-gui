@@ -7,13 +7,26 @@ files:
   - "**/*"
   - "!node_modules/.cache/**/*"
   - "!dist/**/*"
+  - "!coverage/**/*"
+  - "!__tests__/**/*"
+  - "!bin/**/*"
+  - "!.codex/**/*"
+  - "!.mimocode/**/*"
+  - "!.reasonix/**/*"
+  - "!.workbuddy-ai/**/*"
   - "!example_servers.json"
   - "!build.bat"
   - "!build-installer.bat"
 
 asar: true
-asarUnpack:
-  - "bin/**"
+
+# ipmitool.exe + Cygwin DLL 复制到 resources/bin
+# （与 src/modules/ipmiTool.js 的首选查找路径一致，构建脚本不再手动复制）
+extraResources:
+  - from: bin
+    to: bin
+    filter:
+      - "**/*"
 
 win:
   target:

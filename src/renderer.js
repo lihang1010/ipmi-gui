@@ -792,12 +792,10 @@ async function initScan() {
 
 // ========== 内存监控 ==========
 
-let memoryMonitorInterval = null;
-
 function initMemoryMonitor() {
   updateMemoryInfo();
-  // 每 5 秒刷新一次
-  memoryMonitorInterval = setInterval(updateMemoryInfo, 5000);
+  // 每 5 秒刷新一次（页面销毁时随渲染进程回收）
+  setInterval(updateMemoryInfo, 5000);
 }
 
 async function updateMemoryInfo() {

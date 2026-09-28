@@ -2,9 +2,6 @@
  * configStore 模块单元测试
  */
 
-const fs = require('fs');
-const path = require('path');
-
 // 模拟 configStore
 class MockConfigStore {
   constructor() {

@@ -180,9 +180,7 @@ const domReadyHandlers = document.addEventListener.mock.calls
 describe('Renderer Module', () => {
   const { ipcRenderer } = require('electron');
   const configStore = require('../src/modules/configStore');
-  const { safeAlert, safeConfirm } = require('../src/modules/modal');
-  const commandRunner = require('../src/modules/commandRunner');
-  const favorites = require('../src/modules/favorites');
+  const { safeAlert } = require('../src/modules/modal');
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -220,6 +218,7 @@ describe('Renderer Module', () => {
     test('should open edit server dialog with server data', () => {
       const server = { id: '1', name: 'Test', host: '192.168.1.1', port: 623, username: 'admin', password: 'pass' };
       const dialog = document.getElementById('server-dialog');
+      expect(server.host).toBe('192.168.1.1');
       expect(dialog).toBeDefined();
     });
 

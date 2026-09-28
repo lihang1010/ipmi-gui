@@ -3,7 +3,6 @@
  */
 
 const os = require('os');
-const net = require('net');
 
 // Mock child_process
 jest.mock('child_process', () => ({

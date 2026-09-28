@@ -32,7 +32,6 @@ jest.mock('../src/modules/utils', () => ({
 const commandRunner = require('../src/modules/commandRunner');
 const { ipcRenderer } = require('electron');
 const { safeAlert } = require('../src/modules/modal');
-const { showStatus } = require('../src/modules/utils');
 
 describe('CommandRunner Module', () => {
   beforeEach(() => {

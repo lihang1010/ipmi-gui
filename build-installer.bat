@@ -13,7 +13,8 @@ if exist dist (
     exit /b 1
 )
 
-echo [3/4] Building unpacked app and copying ipmitool...
+echo [3/5] Building unpacked app...
+rem bin/ 由 electron-builder 的 extraResources 复制到 resources/bin
 call npx electron-builder --win --dir
 if errorlevel 1 (
     echo Build failed!
@@ -21,13 +22,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
-echo [4/4] Copying ipmitool to resources\bin\...
-if not exist "dist\win-unpacked\resources\bin" mkdir "dist\win-unpacked\resources\bin"
-copy /y "bin\ipmitool.exe" "dist\win-unpacked\resources\bin\"
-copy /y "bin\cygwin1.dll" "dist\win-unpacked\resources\bin\"
-copy /y "bin\cygcrypto-1.0.0.dll" "dist\win-unpacked\resources\bin\"
-copy /y "bin\cygz.dll" "dist\win-unpacked\resources\bin\"
-echo Files copied:
+echo [4/5] Verifying ipmitool...
+if not exist "dist\win-unpacked\resources\bin\ipmitool.exe" (
+    echo ERROR: resources\bin\ipmitool.exe missing, check extraResources in electron-builder.yml
+    pause
+    exit /b 1
+)
 dir "dist\win-unpacked\resources\bin\" /b
 
 echo [5/5] Creating NSIS installer from prepackaged app...
