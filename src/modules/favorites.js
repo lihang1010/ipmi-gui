@@ -9,7 +9,7 @@
 const { ipcRenderer } = require('electron');
 const path = require('path');
 const { safeAlert, safeConfirm } = require('./modal');
-const { escapeHtml, showStatus } = require('./utils');
+const { escapeHtml, showStatus, formatCommandOutput } = require('./utils');
 const { getConfig, saveConfig } = require('./configStore');
 
 // 收藏命令分类（新增分类只需在此追加）
@@ -371,7 +371,7 @@ async function execute(index, currentServer) {
     document.getElementById('panel-raw').classList.add('active');
 
     document.getElementById('raw-command').value = fav.command;
-    document.getElementById('output-raw').textContent = result.code === 0 ? (result.stdout || '(无输出)') : '错误:\n' + result.stderr;
+    document.getElementById('output-raw').textContent = formatCommandOutput(result);
 
     showStatus('connected', fav.name + ' 执行完成');
   } catch (err) {

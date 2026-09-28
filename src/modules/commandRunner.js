@@ -4,6 +4,7 @@
 
 const { ipcRenderer } = require('electron');
 const { safeAlert } = require('./modal');
+const { formatCommandOutput } = require('./utils');
 
 /**
  * 执行 IPMI 命令
@@ -23,7 +24,7 @@ async function executeCommand(command, outputId, currentServer) {
   try {
     const result = await ipcRenderer.invoke('ipmi:execute', currentServer, command);
     if (el) {
-      el.textContent = result.code === 0 ? (result.stdout || '(无输出)') : '错误:\n' + result.stderr;
+      el.textContent = formatCommandOutput(result);
       el.style.opacity = '1';
     }
     return result;

@@ -46,7 +46,8 @@ jest.mock('../src/modules/modal', () => ({
 
 jest.mock('../src/modules/utils', () => ({
   escapeHtml: jest.fn((s) => s),
-  showStatus: jest.fn()
+  showStatus: jest.fn(),
+  formatCommandOutput: jest.requireActual('../src/modules/utils').formatCommandOutput
 }));
 
 jest.mock('../src/modules/configStore', () => {

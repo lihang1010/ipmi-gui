@@ -51,6 +51,25 @@ function clearOutput(elementId) {
 }
 
 /**
+ * 格式化 ipmi:execute 的返回结果用于展示
+ *
+ * 注意：ipmitool 的 help / usage（如 `help`、`sdr help`）会把帮助文本写到
+ * stderr，且退出码为 0 —— 因此两个流都要看，只取 stdout 会显示成"无输出"。
+ *
+ * @param {{code:number, stdout:string, stderr:string}} result
+ * @returns {string} 展示文本
+ */
+function formatCommandOutput(result) {
+  const stdout = (result && result.stdout) || '';
+  const stderr = (result && result.stderr) || '';
+
+  if (!result || result.code !== 0) {
+    return '错误:\n' + (stderr || stdout || '未知错误');
+  }
+  return stdout || stderr || '(无输出)';
+}
+
+/**
  * 验证 IP 地址格式
  */
 function isValidIP(ip) {
@@ -66,5 +85,6 @@ module.exports = {
   escapeHtml,
   showStatus,
   clearOutput,
-  isValidIP
+  isValidIP,
+  formatCommandOutput
 };

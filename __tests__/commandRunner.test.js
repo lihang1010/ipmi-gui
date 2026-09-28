@@ -26,7 +26,8 @@ jest.mock('../src/modules/modal', () => ({
 }));
 
 jest.mock('../src/modules/utils', () => ({
-  showStatus: jest.fn()
+  showStatus: jest.fn(),
+  formatCommandOutput: jest.requireActual('../src/modules/utils').formatCommandOutput
 }));
 
 const commandRunner = require('../src/modules/commandRunner');
@@ -83,6 +84,23 @@ describe('CommandRunner Module', () => {
       const server = { id: '1' };
       await commandRunner.executeCommand('test', 'output-test', server);
       expect(el.textContent).toBe('(无输出)');
+    });
+
+    test('help 类命令（退出码 0、内容在 stderr）应正常显示（回归）', async () => {
+      // 真实 ipmitool：`help` / `sdr help` 退出码为 0，帮助文本写在 stderr
+      ipcRenderer.invoke.mockResolvedValueOnce({
+        code: 0,
+        stdout: '',
+        stderr: 'Commands:\n\traw           Send a RAW IPMI request and print response\n'
+      });
+      const el = { textContent: '', style: {} };
+      document.getElementById = jest.fn(() => el);
+      const server = { id: '1' };
+
+      await commandRunner.executeCommand('help', 'output-raw', server);
+
+      expect(el.textContent).toContain('Send a RAW IPMI request');
+      expect(el.textContent).not.toBe('(无输出)');
     });
   });
 
