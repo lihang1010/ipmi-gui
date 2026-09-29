@@ -327,15 +327,18 @@ describe('fru.parseEditResult', () => {
     expect(result.newValue).toBe('FRU-VERIFY-20260928');
   });
 
-  test('should detect same-size success', () => {
+  test('should treat the same-size in-place path as success (no Done. marker)', () => {
+    // 真机原文：新值与旧值等长时 ipmi_fru.c:4977 走原地替换，只打印这一行，
+    // 既不打印 `Writing new FRU.` 也不打印 `Done.`，退出码为 0
     const result = fru.parseEditResult({
-      code: 1,
-      stderr: '',
-      stdout: "Updating Field 'AT-1' with 'AT-2' ...\nWriting new FRU.\nDone."
+      code: 0,
+      stderr: 'Running Get PICMG Properties my_addr 0x20\n',
+      stdout: "Updating Field 'AAA' with 'XYZ' ...\n"
     });
+
     expect(result.ok).toBe(true);
-    expect(result.oldValue).toBe('AT-1');
-    expect(result.newValue).toBe('AT-2');
+    expect(result.oldValue).toBe('AAA');
+    expect(result.newValue).toBe('XYZ');
   });
 
   test('should report field not found', () => {
@@ -366,12 +369,24 @@ describe('fru.parseEditResult', () => {
     expect(result.error).toContain('刷新');
   });
 
-  test('should flag a write that produced no Done marker', () => {
+  test('should still fail when the error follows Updating Field', () => {
+    // 失败时同样会先打印 Updating Field，错误行在它之后 —— 错误判定必须先于成功判定
     const result = fru.parseEditResult({
-      stdout: "Updating Field : 'N/A' with 'X' ... (Length from '195' to '193')\n"
+      code: 1,
+      stderr: '',
+      stdout: "Updating Field 'AAA' with 'XYZ' ...\nWrite to FRU data failed.\n"
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('写入 FRU 失败');
+  });
+
+  test('should report the rebuild padding error', () => {
+    const result = fru.parseEditResult({
+      stdout: 'Internal error, padding length 9 (must be from 0 to 7) '
     });
     expect(result.ok).toBe(false);
-    expect(result.error).toContain('未完成');
+    expect(result.error).toContain('padding');
   });
 
   test('should report usage errors coming from stderr', () => {
@@ -451,5 +466,131 @@ describe('fru.parseFruList', () => {
     expect(fru.parseFruList('Chassis Type : Rack Mount Chassis')).toEqual([]);
     expect(fru.parseFruList('')).toEqual([]);
     expect(fru.parseFruList(null)).toEqual([]);
+  });
+});
+
+/**
+ * fru print 解析（方案 C 的快速预览数据源）
+ *
+ * 夹具是 192.168.60.44 fru id 0 的 `fru print -v 0` 真实 stdout
+ * （`-v` 的 PICMG 调试信息走 stderr，不在其中）。
+ */
+describe('fru.parseFruPrint', () => {
+  // prettier-ignore
+  const PRINT_V_OUTPUT = [
+    ' Chassis Type          : Rack Mount Chassis',
+    ' Chassis Part Number   : 2222222222',
+    ' Chassis Serial        : SN-C123',
+    ' Chassis Extra         : N/A',
+    ' Chassis Extra         : Ver=C',
+    ' Board Mfg Date        : Wed Mar 11 13:33:00 2026',
+    ' Board Mfg             : TTYTTY',
+    ' Board Product         : T1HDE-TTY',
+    ' Board Serial          : SN-B',
+    ' Board Part Number     : PN-B',
+    ' Board FRU ID          : 2.00.35.03',
+    ' Board Extra           : N/A',
+    ' Board Extra           : Ver=D',
+    ' Product Manufacturer  : AAA',
+    ' Product Name          : Rack Server BBB',
+    ' Product Part Number   : PN-P',
+    ' Product Version       : KP920XXXX',
+    ' Product Serial        : SN-P',
+    ' Product Asset Tag     : AT-1',
+    ' Product FRU ID        : 2.00.00.03',
+    ' Product Extra         : N/A',
+    ' Product Extra         : Ver=E'
+  ].join('\n');
+
+  test('should parse fields and infer index from labels', () => {
+    const image = fru.parseFruPrint(PRINT_V_OUTPUT);
+
+    expect(image.valid).toBe(true);
+    expect(image.source).toBe('print');
+
+    const product = sectionOf(image, 'product');
+    expect(product.fields.map(f => [f.index, f.label, f.value])).toEqual([
+      [0, 'Product Manufacturer', 'AAA'],
+      [1, 'Product Name', 'Rack Server BBB'],
+      [2, 'Product Part Number', 'PN-P'],
+      [3, 'Product Version', 'KP920XXXX'],
+      [4, 'Product Serial', 'SN-P'],
+      [5, 'Product Asset Tag', 'AT-1'],
+      [6, 'Product FRU ID', '2.00.00.03'],
+      [7, 'Product Extra', 'N/A'],
+      [8, 'Product Extra', 'Ver=E']
+    ]);
+  });
+
+  test('should infer exactly the same indexes as the binary image', () => {
+    // 同一台设备：fru print -v 与 fru read 的 (区, 序号, 标签) 必须一一对应
+    const fromPrint = fru.parseFruPrint(PRINT_V_OUTPUT);
+    const fromBinary = fru.parseFruImage(makeImage());
+    const shape = (image) => image.sections.map(s => ({
+      key: s.key,
+      fields: s.fields.map(f => [f.index, f.label])
+    }));
+
+    expect(shape(fromPrint)).toEqual(shape(fromBinary));
+  });
+
+  test('should not shift indexes when empty fields are omitted', () => {
+    // print 会整行跳过空字段：删掉 Board Product 与 Product Version 两行来模拟
+    const withGaps = PRINT_V_OUTPUT
+      .split('\n')
+      .filter(line => !/Board Product|Product Version/.test(line))
+      .join('\n');
+
+    const image = fru.parseFruPrint(withGaps);
+
+    expect(sectionOf(image, 'board').fields.map(f => [f.index, f.label])).toEqual([
+      [0, 'Board Mfg'],
+      [2, 'Board Serial'],
+      [3, 'Board Part Number'],
+      [4, 'Board FRU ID'],
+      [5, 'Board Extra'],
+      [6, 'Board Extra']
+    ]);
+    // 关键：后续字段的序号不受前面缺失字段影响
+    expect(sectionOf(image, 'product').fields.find(f => f.index === 7).label).toBe('Product Extra');
+  });
+
+  test('should expose non-string fields as readonly extras without consuming index', () => {
+    const image = fru.parseFruPrint(PRINT_V_OUTPUT);
+
+    expect(sectionOf(image, 'chassis').extras.chassisType).toBe('Rack Mount Chassis');
+    expect(sectionOf(image, 'board').extras.mfgDate).toBe('Wed Mar 11 13:33:00 2026');
+    // Chassis Type 不占字段序号
+    expect(sectionOf(image, 'chassis').fields[0]).toMatchObject({
+      index: 0,
+      label: 'Chassis Part Number'
+    });
+  });
+
+  test('should ignore internal use area and unrecognised labels', () => {
+    const text = PRINT_V_OUTPUT +
+      '\n Internal Use Area Offset : 0x60\n Internal Use Area Size   : 32\n Unknown Column           : x';
+    const image = fru.parseFruPrint(text);
+    const labels = image.sections.flatMap(s => s.fields.map(f => f.label));
+
+    expect(labels).not.toContain('Internal Use Area Offset');
+    expect(labels).not.toContain('Internal Use Area Size');
+    expect(labels).not.toContain('Unknown Column');
+  });
+
+  test('should mark fields above index 9 as not editable', () => {
+    const lines = [' Chassis Type          : Rack Mount Chassis', ' Chassis Part Number   : PN'];
+    for (let i = 0; i < 12; i++) lines.push(' Chassis Extra         : E' + i);
+
+    const chassis = sectionOf(fru.parseFruPrint(lines.join('\n')), 'chassis');
+    expect(chassis.fields.find(f => f.index === 9).editable).toBe(true);
+    expect(chassis.fields.find(f => f.index === 10).editable).toBe(false);
+  });
+
+  test('should reject empty or unrecognisable output', () => {
+    expect(fru.parseFruPrint('')).toMatchObject({ valid: false, source: 'print' });
+    expect(fru.parseFruPrint(null).valid).toBe(false);
+    expect(fru.parseFruPrint('   \n  ').valid).toBe(false);
+    expect(fru.parseFruPrint('hello world').valid).toBe(false);
   });
 });

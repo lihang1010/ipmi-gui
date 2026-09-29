@@ -162,8 +162,17 @@ ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据�
 
 ### FRU 读取与字段编辑 (src/modules/fru.js + fruView.js)
 
-读取：`fru read <id> <file>` 取回二进制镜像，再由 `parseFruImage()` 解析三区字段。
-**不要用 `fru print` 文本解析**——它默认省略 Board/Product FRU ID 行，字段 index 会整体错位。
+读取分两阶段（见 `fruView.load` + `loadPreview`）：
+
+1. **预览**：`-v fru print <id>`（约 0.4s）→ `parseFruPrint()` → 先渲染字段表，编辑按钮锁定。
+   **`-v` 必须写在 `fru` 之前**：写成 `fru print -v <id>` 时 ipmitool 不报错但 stdout
+   为空（实测 0 字符），预览会静默失效。
+2. **校准**：`fru read <id> <file>`（约 1.2s）→ `parseFruImage()` → 权威结果，解锁编辑。
+   写入一律以这一份为准（`openEdit` 会拒绝未校准状态）。
+
+两套解析并存的原因：`fru print` **会整行跳过空字段**，`-v` 前还不显示 FRU ID 行，
+按行号数序号必然错位。`parseFruPrint` 改为按字段标签反查 `FRU_SECTIONS` 得到 index、
+Extra 按出现顺序累加，因此空字段缺失不影响其它字段的序号识别（fru.test.js 有测试固定）。
 
 写入：`fru edit <fruid> field <section> <index> <string>`，契约来自 ipmitool
 `lib/ipmi_fru.c` 源码与真机实测（ipmitool 1.8.18）：
@@ -172,8 +181,18 @@ ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据�
 - `<index>` 取参数的**首字符**再减 0x30，即只能是 `'0'`~`'9'`；传 `50` 等价于 `5`
 - index = 区内**字符串字段序号**（0 起），起点为 区起始 + 3（Chassis）/+ 6（Board，
   跳过 Language Code 与 3 字节 Mfg Date）/+ 3（Product），含 FRU ID 与多行 Extra
-- **命令成功时退出码为 1**，禁止用 exit code 判定成败，必须解析输出：成功含
-  `Updating Field : '<旧值>' with '<新值>'` 与 `Done.`；旧值可用于校验"改到的确实是预期字段"
+- **不能用 exit code 判定成败**：长度改变（重排三区）成功时为 1，长度不变（原地替换）成功时为 0
+- **判定成功的唯一标志是 stdout 里的 `Updating Field`，不可要求 `Done.`**。ipmitool 有两条
+  互斥路径（`lib/ipmi_fru.c:4977 / 5002`）：
+  1. 新值与旧值**等长** → 原地替换，只打印 `Updating Field '<旧>' with '<新>' ...`，
+     **没有 `Done.`、也没有 `Writing new FRU.`，退出码 0**
+  2. 长度改变 → 调用 rebuild 重排三区，打印带 `(Length from a to b)` 的版本 + `Done.`，退出码 1
+
+  只认第 2 种会让**等长写入被误判为失败**，用户看到「写入流程未完成」但设备其实已改成功
+  （真机踩过，短字段如 Board Extra `N/A` 最易触发）
+- **错误判定必须先于成功判定**：写入失败时同样会打印 `Updating Field`，错误行在它之后
+  （`Write to FRU data failed.` / `Internal error, padding length ...`）
+- 两种格式里的旧值都取自目标字段本身，可用于校验"改到的确实是预期字段"
 - 空字符串字段不可编辑（报 `Field not found !`）；新值上限 63 字节且仅可打印 ASCII
 - 新值一律走 IPC 的 argv 参数传递，不拼进命令字符串
 
@@ -183,6 +202,9 @@ ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据�
 （见 fruView.validatePreview），不要改成始终可点。
 写入 + 重新读取实测约 3.4 秒，且对话框会遮住摘要行状态，因此进度**必须**显示在
 对话框内部（fruView.setProgress）；期间用 setBusy 冻结对话框，结束后再解除。
+
+**对话框的关闭时机**：未提交时只有「×」和「取消」两个入口；**写入成功后自动关闭**。
+刻意不绑定遮罩点击 —— 否则手滑点到对话框外面就会丢掉已输入的内容。
 **不做写前自动备份**：需要留存原始数据由用户点「导出备份」（`fru read`）自行保存；
 GUI 不提供整区 `fru write` 入口，回滚需在「原始命令」面板手工执行。
 
@@ -201,9 +223,10 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - Node 内置模块用 jest.mock() 行内 mock
 - dgram、net、child_process、fs、path、os 均已 mock
 - fullScan 测试设 30s 超时
-- fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）断言 index 映射
-- fruView.test.js 只测纯函数（渲染/planEdit/evaluateEditOutcome），DOM 用注入桩
-- 共 478 用例，19 套件
+- fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
+- fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
+- **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
+- 共 490 用例，19 套件
 
 ---
 

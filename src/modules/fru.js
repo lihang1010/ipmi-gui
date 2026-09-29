@@ -318,6 +318,117 @@ function parseFruImage(buffer) {
 }
 
 /**
+ * 标签 → { sectionKey, index } 映射（由 FRU_SECTIONS 生成，避免维护两份表）
+ * Extra 字段的序号需按出现顺序累加，这里只做 extra 标记
+ * @returns {Map<string, {sectionKey:string, index?:number, extra?:boolean}>}
+ */
+function buildPrintLabelMap() {
+  const map = new Map();
+  FRU_SECTIONS.forEach(section => {
+    section.fields.forEach((label, index) => {
+      map.set(label, { sectionKey: section.key, index });
+    });
+    map.set(section.extraLabel, { sectionKey: section.key, extra: true });
+  });
+  return map;
+}
+
+const PRINT_LABEL_MAP = buildPrintLabelMap();
+
+/**
+ * 解析 `fru print -v <id>` 的输出
+ *
+ * 用途：在 `fru read` 的二进制镜像就绪前先渲染字段表（print 比 read 快约 3 倍）。
+ *
+ * 关键点：print **会整行跳过空字段**，所以不能按行号数序号。这里改为按字段标签
+ * 反查 FRU_SECTIONS 得到 index，Extra 字段按出现顺序累加 —— 空字段缺失不会影响
+ * 其它任何字段的序号识别。
+ *
+ * 结果仅供展示（source === 'print'，编辑按钮锁定）；写入一律以 parseFruImage 为准。
+ *
+ * @param {string} output ipmitool 的 stdout
+ * @returns {object} 与 parseFruImage 同构的结果
+ */
+function parseFruPrint(output) {
+  const text = String(output || '');
+  if (!text.trim()) {
+    return { valid: false, error: 'fru print 没有输出', source: 'print', size: 0, header: null, sections: [] };
+  }
+
+  const sections = FRU_SECTIONS.map(section => ({
+    key: section.key,
+    shortKey: section.shortKey,
+    label: section.label,
+    title: section.title,
+    offset: 0,
+    length: 0,
+    checksumValid: true,
+    fields: [],
+    extras: {}
+  }));
+  const byKey = new Map(sections.map(section => [section.key, section]));
+  const extraCursor = new Map(FRU_SECTIONS.map(section => [section.key, section.fields.length]));
+
+  text.split(/\r?\n/).forEach(line => {
+    const match = line.match(/^\s+([^:]+?)\s*:\s?(.*)$/);
+    if (!match) return;
+
+    const label = match[1].trim();
+    const value = match[2];
+
+    // 非字符串字段：print 给出人类可读描述，作为只读附加信息
+    if (label === 'Chassis Type') {
+      byKey.get('chassis').extras.chassisType = value.trim();
+      return;
+    }
+    if (label === 'Board Mfg Date') {
+      byKey.get('board').extras.mfgDate = value.trim();
+      return;
+    }
+    if (/^Internal Use Area/i.test(label)) return;
+
+    const target = PRINT_LABEL_MAP.get(label);
+    if (!target) return;
+
+    const section = byKey.get(target.sectionKey);
+    if (!section) return;
+
+    let index = target.index;
+    if (target.extra) {
+      // Extra 字段没有固定标签，按出现顺序从该区固定字段数之后累加
+      index = extraCursor.get(target.sectionKey);
+      extraCursor.set(target.sectionKey, index + 1);
+    }
+
+    section.fields.push({
+      index,
+      label,
+      value,
+      type: TYPE_LATIN1,
+      rawLength: value.length,
+      offset: -1,
+      editable: value.length > 0 && index <= MAX_FIELD_INDEX
+    });
+  });
+
+  sections.forEach(section => section.fields.sort((a, b) => a.index - b.index));
+
+  const kept = sections.filter(s => s.fields.length || Object.keys(s.extras).length);
+  if (!kept.length) {
+    return {
+      valid: false,
+      error: '未能从 fru print 输出中识别出字段',
+      source: 'print',
+      size: 0,
+      header: null,
+      sections: []
+    };
+  }
+
+  return { valid: true, error: null, size: 0, header: null, sections: kept, source: 'print' };
+}
+
+/**
  * 解析 `fru list` 输出
  * @param {string} output
  * @returns {Array<{id:string, description:string}>}
@@ -414,12 +525,7 @@ function parseEditResult(result) {
   const stderr = (result && result.stderr) || '';
   const raw = (stdout + '\n' + stderr).trim();
 
-  const updating = stdout.match(/Updating Field\s*:?\s*'([\s\S]*)' with '([\s\S]*)'\s*\.\.\./);
-
-  if (updating && stdout.includes('Done.')) {
-    return { ok: true, oldValue: updating[1], newValue: updating[2], error: null, raw };
-  }
-
+  // 失败必须先判：写入失败时同样会打印 Updating Field，只是后面紧跟错误行
   let error = null;
   if (/Field not found/i.test(raw)) {
     error = '目标字段不存在：该位置为空字段或序号超出实际字段数，ipmitool 拒绝写入';
@@ -429,17 +535,35 @@ function parseEditResult(result) {
     error = '设备未响应或凭据 / 权限不足';
   } else if (/Write to FRU data failed/i.test(raw)) {
     error = '写入 FRU 失败，设备端可能未变更，请点「刷新」确认当前值';
+  } else if (/Internal error, padding length/i.test(raw)) {
+    error = 'ipmitool 内部错误（重排后 padding 越界），FRU 未写入';
   } else if (/Out of memory/i.test(raw)) {
     error = 'ipmitool 内存不足';
   } else if (/Not enough parameters/i.test(raw)) {
     error = 'ipmitool 参数不足';
-  } else if (updating) {
-    error = '写入流程未完成，FRU 当前状态未知，请点「刷新」确认';
-  } else {
-    error = raw ? '未识别的输出：' + raw : 'ipmitool 无任何输出';
   }
 
-  return { ok: false, oldValue: null, newValue: null, error, raw };
+  if (error) return { ok: false, oldValue: null, newValue: null, error, raw };
+
+  // 成功有两条互斥路径（ipmi_fru.c:4977 / 5002），判定**不能依赖 Done.**：
+  //   1) 新值与旧值等长 → 原地替换：`Updating Field '<旧>' with '<新>' ...`，
+  //      不打印 Done.，且退出码为 0
+  //   2) 长度改变 → 重排三区：`Updating Field : '<旧>' with '<新>' ... (Length from a to b)`
+  //      后打印 `Done.`，退出码为 1
+  // 历史上只认带 Done. 的第 2 种，导致等长写入被误判为「写入流程未完成」。
+  // 两种格式的旧值都取自目标字段本身，可用于校验改到的确实是预期字段。
+  const updating = stdout.match(/Updating Field\s*:?\s*'([\s\S]*)' with '([\s\S]*)'\s*\.\.\./);
+  if (updating) {
+    return { ok: true, oldValue: updating[1], newValue: updating[2], error: null, raw };
+  }
+
+  return {
+    ok: false,
+    oldValue: null,
+    newValue: null,
+    error: raw ? '未识别的输出：' + raw : 'ipmitool 无任何输出',
+    raw
+  };
 }
 
 /**
@@ -518,6 +642,7 @@ module.exports = {
   formatMfgDate,
   parseSection,
   parseFruImage,
+  parseFruPrint,
   parseFruList,
   validateFruString,
   buildEditInvocation,

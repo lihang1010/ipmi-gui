@@ -77,18 +77,28 @@ function renderStaticRow(label, value, reason) {
 
 /**
  * 渲染单个字段行
+ * @param {object} section
+ * @param {object} field
+ * @param {{locked?:boolean}} [options] locked 表示处于 print 预览态（序号尚未校准）
  */
-function renderFieldRow(section, field) {
+function renderFieldRow(section, field, options) {
+  const opts = options || {};
   const reason = lockReason(field);
   const editable = !reason;
 
   const valueText = field.value ? escapeHtml(field.value) : '(空)';
   const valueClass = field.value ? 'fru-field-value' : 'fru-field-value empty';
 
-  const actions = editable
-    ? '<button class="btn btn-sm fru-edit-btn" data-section="' + escapeHtml(section.shortKey) +
-        '" data-index="' + field.index + '">编辑</button>'
-    : '<span class="fru-field-lock" title="' + escapeHtml(reason) + '">只读</span>';
+  let actions;
+  if (!editable) {
+    actions = '<span class="fru-field-lock" title="' + escapeHtml(reason) + '">只读</span>';
+  } else if (opts.locked) {
+    actions = '<button class="btn btn-sm fru-edit-btn" disabled' +
+      ' title="正在校准字段序号，请稍候">编辑</button>';
+  } else {
+    actions = '<button class="btn btn-sm fru-edit-btn" data-section="' + escapeHtml(section.shortKey) +
+      '" data-index="' + field.index + '">编辑</button>';
+  }
 
   return '' +
     '<div class="fru-field-row' + (editable ? '' : ' readonly') + '">' +
@@ -102,7 +112,8 @@ function renderFieldRow(section, field) {
 /**
  * 渲染单个区域
  */
-function renderSection(section) {
+function renderSection(section, options) {
+  const opts = options || {};
   const rows = [];
 
   if (section.extras && section.extras.chassisType) {
@@ -114,10 +125,12 @@ function renderSection(section) {
       '制造日期为 3 字节二进制时间戳，ipmitool fru edit 不提供编辑入口'));
   }
 
-  section.fields.forEach(field => rows.push(renderFieldRow(section, field)));
+  section.fields.forEach(field => rows.push(renderFieldRow(section, field, opts)));
 
-  const meta = '偏移 0x' + section.offset.toString(16).toUpperCase() +
-    ' · ' + section.length + 'B · 校验和 ' + (section.checksumValid ? 'OK' : 'INVALID');
+  const meta = opts.preview
+    ? '预览 · 序号校准中'
+    : '偏移 0x' + section.offset.toString(16).toUpperCase() +
+      ' · ' + section.length + 'B · 校验和 ' + (section.checksumValid ? 'OK' : 'INVALID');
 
   return '' +
     '<div class="fru-section">' +
@@ -134,7 +147,8 @@ function renderSection(section) {
  * @param {object} image parseFruImage 的产物
  * @returns {string} HTML
  */
-function renderFruSections(image) {
+function renderFruSections(image, options) {
+  const opts = options || {};
   if (!image || !image.valid) {
     const message = (image && image.error) || '无法解析 FRU 数据';
     return '<div class="fru-placeholder">' + escapeHtml(message) + '</div>';
@@ -142,7 +156,12 @@ function renderFruSections(image) {
   if (!image.sections.length) {
     return '<div class="fru-placeholder">该 FRU 没有可解析的信息区</div>';
   }
-  return image.sections.map(renderSection).join('');
+  // print 预览来自快速命令，字段序号尚未经二进制校验，一律锁定编辑
+  const preview = image.source === 'print';
+  return image.sections.map(section => renderSection(section, {
+    locked: !!(opts.locked || preview),
+    preview
+  })).join('');
 }
 
 /**
@@ -161,12 +180,19 @@ function summarizeImage(image, fruId, description) {
   }
 
   const fieldCount = image.sections.reduce((sum, section) => sum + section.fields.length, 0);
+  const title = description ? description + '（ID ' + fruId + '）' : 'FRU ID ' + fruId;
+
+  // print 预览：没有镜像尺寸与校验和信息
+  if (image.source === 'print') {
+    return { title, meta: fieldCount + ' 个字段 · 预览（正在校准序号）' };
+  }
+
   const editableCount = image.sections.reduce(
     (sum, section) => sum + section.fields.filter(f => f.editable).length, 0);
   const checksumOk = image.header.checksumValid && image.sections.every(s => s.checksumValid);
 
   return {
-    title: (description ? description + '（ID ' + fruId + '）' : 'FRU ID ' + fruId),
+    title,
     meta: image.size + 'B · ' + image.sections.length + ' 个信息区 · ' +
       fieldCount + ' 个字段（可编辑 ' + editableCount + '）· 校验和 ' +
       (checksumOk ? '正常' : '异常')
@@ -287,7 +313,10 @@ let deps = {
 
 let fruList = [];
 let currentFruId = null;
+/** 已校准的二进制解析结果：编辑的唯一基准 */
 let currentImage = null;
+/** `fru print -v` 快速预览结果（仅展示，序号未校准） */
+let previewImage = null;
 let busy = false;
 
 /**
@@ -409,17 +438,20 @@ function formatResult(result) {
 }
 
 function renderCurrent() {
+  // 已校准用二进制结果；否则退回 print 预览（编辑按钮会被锁定）
+  const image = currentImage || previewImage;
+
   const fieldsEl = document.getElementById('fru-fields');
-  if (fieldsEl) fieldsEl.innerHTML = renderFruSections(currentImage);
+  if (fieldsEl) fieldsEl.innerHTML = renderFruSections(image);
 
   // 列标题只在实际有字段表时出现
   const headEl = document.getElementById('fru-table-head');
   if (headEl) {
-    const hasRows = !!(currentImage && currentImage.valid && currentImage.sections.length);
+    const hasRows = !!(image && image.valid && image.sections.length);
     headEl.style.display = hasRows ? 'grid' : 'none';
   }
 
-  const summary = summarizeImage(currentImage, currentFruId, currentDescription());
+  const summary = summarizeImage(image, currentFruId, currentDescription());
   const titleEl = document.getElementById('fru-summary-title');
   const metaEl = document.getElementById('fru-summary-meta');
   if (titleEl) titleEl.textContent = summary.title;
@@ -476,7 +508,30 @@ async function refresh() {
 }
 
 /**
+ * 快速预览：`fru print -v` 约 0.4s，比 `fru read` 快约 3 倍
+ *
+ * 先渲染出来让用户尽早看到字段内容；此结果只展示，编辑按钮锁定，
+ * 序号一律以随后的二进制校准为准。
+ *
+ * @param {string|number} fruId
+ * @returns {Promise<object|null>} 解析成功返回 image，失败返回 null
+ */
+async function loadPreview(fruId) {
+  try {
+    // 注意：-v 必须写在 `fru` 之前（全局选项）。写成 `fru print -v <id>` 时
+    // ipmitool 不报错但 stdout 为空（实测 0 字符），预览会静默失效。
+    const result = await deps.invoke('-v fru print', [String(fruId)]);
+    const image = fru.parseFruPrint((result && result.stdout) || '');
+    return image.valid ? image : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+/**
  * 读取当前选中的 FRU 并解析字段
+ *
+ * 两阶段：先 print 预览（快，仅供查看），再 read 二进制校准（权威，用于编辑）。
  */
 async function load() {
   if (busy) return;
@@ -487,26 +542,38 @@ async function load() {
     return;
   }
 
+  currentImage = null;
+  previewImage = null;
+
   setBusy(true, '读取中...');
   try {
-    const filePath = tempImagePath(server, currentFruId);
-    const read = await readFruImage(server, currentFruId, filePath);
+    // ---------- 阶段 1：快速预览 ----------
+    previewImage = await loadPreview(currentFruId);
+    if (previewImage) {
+      renderCurrent();
+      setResult('pending', '已显示字段预览，正在校准序号…');
+    }
+
+    // ---------- 阶段 2：二进制校准（编辑基准）----------
+    const read = await readFruImage(server, currentFruId, tempImagePath(server, currentFruId));
 
     if (!read.ok) {
-      currentImage = null;
       renderCurrent();
       setResult('error', read.error, read.detail);
       return;
     }
 
-    currentImage = read.image;
-    renderCurrent();
-
-    if (currentImage.valid) {
-      setResult('ok', '读取成功');
-    } else {
-      setResult('error', currentImage.error);
+    if (!read.image.valid) {
+      // 二进制解析失败：保留 print 预览（只读），只报错
+      renderCurrent();
+      setResult('error', read.image.error, read.detail);
+      return;
     }
+
+    currentImage = read.image;
+    previewImage = null;
+    renderCurrent();
+    setResult('ok', '读取成功');
   } catch (err) {
     setResult('error', '读取异常: ' + err.message);
   } finally {
@@ -552,8 +619,11 @@ async function exportBackup() {
  * 打开编辑对话框
  */
 async function openEdit(sectionKey, index) {
+  // 编辑必须以二进制校准结果为准：预览态的序号尚未验证，不能用于写入
   if (!currentImage || !currentImage.valid) {
-    await deps.alert('尚未读取 FRU 数据，请先刷新');
+    await deps.alert(previewImage
+      ? '字段序号正在校准，请稍候再试'
+      : '尚未读取 FRU 数据，请先刷新');
     return;
   }
 
@@ -769,13 +839,8 @@ function initFruPanel(dependencies) {
     });
   }
 
-  const dialog = document.getElementById('fru-dialog');
-  if (dialog) {
-    dialog.addEventListener('click', (e) => {
-      if (e.target === dialog && !busy) closeEdit();
-    });
-  }
-
+  // 刻意不绑定遮罩点击关闭：编辑框只在点「×」或「取消」时关闭，
+  // 避免手滑点到遮罩就丢掉已输入的内容。
   renderSelect();
 }
 

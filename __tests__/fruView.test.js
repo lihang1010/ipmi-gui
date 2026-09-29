@@ -350,6 +350,48 @@ describe('fruView 写入交互反馈', () => {
   const imageBuffer = Buffer.alloc(2048);
   Buffer.from(FRU_IMAGE_HEX, 'hex').copy(imageBuffer);
 
+  /** Product Extra(index 7) 值的首字节在整个镜像中的偏移（夹具注释：fields @155，值 @156） */
+  const PRODUCT_EXTRA_VALUE_OFFSET = 156;
+
+  /**
+   * 模拟设备上 Product Extra（index 7）的当前值。
+   * 夹具里它就是 `N/A`（3 字节），改写必须保持等长 —— 否则会破坏 type/length 编码。
+   */
+  let deviceValue = 'N/A';
+
+  function readBuffer() {
+    const buf = Buffer.from(imageBuffer);
+    buf.write(deviceValue, PRODUCT_EXTRA_VALUE_OFFSET, 'latin1');
+    return buf;
+  }
+
+  // fru print -v 的真实输出（值取自同一份镜像，便于与校准结果对照）
+  // prettier-ignore
+  const PRINT_V_OUTPUT = [
+    ' Chassis Type          : Rack Mount Chassis',
+    ' Chassis Part Number   : PN-C',
+    ' Chassis Serial        : SN-C',
+    ' Chassis Extra         : N/A',
+    ' Chassis Extra         : Ver=C',
+    ' Board Mfg Date        : Wed Mar 11 13:33:00 2026',
+    ' Board Mfg             : TTYTTY',
+    ' Board Product         : T1HDE-TTY',
+    ' Board Serial          : SN-B',
+    ' Board Part Number     : PN-B',
+    ' Board FRU ID          : 2.00.00.03',
+    ' Board Extra           : N/A',
+    ' Board Extra           : Ver=D',
+    ' Product Manufacturer  : AAA',
+    ' Product Name          : Rack Server BBB',
+    ' Product Part Number   : PN-P',
+    ' Product Version       : KP920XXXX',
+    ' Product Serial        : SN-P',
+    ' Product Asset Tag     : AT-1',
+    ' Product FRU ID        : 2.00.00.03',
+    ' Product Extra         : N/A',
+    ' Product Extra         : Ver=E'
+  ].join('\n');
+
   const progressLog = [];
   let elements = {};
   let releaseEdit = null;
@@ -358,8 +400,10 @@ describe('fruView 写入交互反馈', () => {
     const base = {
       id, innerHTML: '', value: '', className: '', disabled: false, title: '',
       scrollTop: 0, scrollHeight: 0, style: {}, dataset: {},
+      listeners: {},
       classList: { toggle() {}, add() {}, remove() {}, contains: () => false },
-      addEventListener() {}, focus() {}
+      addEventListener(type, handler) { base.listeners[type] = handler; },
+      focus() {}
     };
     let text = '';
     Object.defineProperty(base, 'textContent', {
@@ -394,6 +438,7 @@ describe('fruView 写入交互反馈', () => {
     elements = {};
     progressLog.length = 0;
     releaseEdit = null;
+    deviceValue = 'N/A';
 
     global.document = {
       getElementById: el,
@@ -409,15 +454,18 @@ describe('fruView 写入交互反馈', () => {
           stderr: ''
         });
       }
+      if (command === '-v fru print') {
+        return Promise.resolve({ code: 0, stdout: PRINT_V_OUTPUT, stderr: '' });
+      }
       if (command === 'fru read') {
         const target = args[1];
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, imageBuffer);
+        fs.writeFileSync(target, readBuffer());
         return Promise.resolve({ code: 0, stdout: 'Fru Size         : 2048 bytes\nDone\n', stderr: '' });
       }
-      // fru edit：挂起，便于断言写入期间的界面状态
+      // fru edit：挂起，便于断言写入期间的界面状态（releaseEdit 可传入自定义结果）
       return new Promise(resolve => {
-        releaseEdit = () => resolve({ code: 1, stdout: EDIT_OK_OUTPUT, stderr: '' });
+        releaseEdit = (result) => resolve(result || { code: 1, stdout: EDIT_OK_OUTPUT, stderr: '' });
       });
     });
 
@@ -464,5 +512,102 @@ describe('fruView 写入交互反馈', () => {
     expect(el('fru-dialog-cancel').disabled).toBe(false);
     expect(el('fru-dialog-value').disabled).toBe(false);
     expect(el('fru-dialog-progress-text').textContent).toBe('');
+  });
+
+  test('写入成功后应自动关闭对话框（等长路径无 Done. 也算成功）', async () => {
+    await fruView.openEdit('p', 7);
+    expect(el('fru-dialog').style.display).toBe('flex');
+
+    el('fru-dialog-value').value = 'XYZ';
+    fruView.validatePreview('XYZ');
+    const pending = fruView.submitEdit();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // 等长原地替换：真机上只有一行、没有 Done.、退出码 0，旧值是目标字段的真实旧值
+    deviceValue = 'XYZ';
+    releaseEdit({ code: 0, stdout: "Updating Field 'N/A' with 'XYZ' ...\n", stderr: '' });
+    await pending;
+
+    expect(el('fru-result').className).toContain('ok');
+    // 写入成功 → 自动关闭，进度区随之清空
+    expect(el('fru-dialog').style.display).toBe('none');
+    expect(el('fru-dialog-progress').style.display).toBe('none');
+  });
+
+  test('未提交时只由「×」和「取消」关闭，不绑遮罩点击', async () => {
+    await fruView.openEdit('p', 7);
+    expect(el('fru-dialog').style.display).toBe('flex');
+
+    // 没有绑定遮罩 click —— 不存在「手滑点到遮罩就丢掉输入」的路径
+    expect(el('fru-dialog').listeners.click).toBeUndefined();
+
+    el('fru-dialog-close').listeners.click();
+    expect(el('fru-dialog').style.display).toBe('none');
+
+    await fruView.openEdit('p', 7);
+    el('fru-dialog-cancel').listeners.click();
+    expect(el('fru-dialog').style.display).toBe('none');
+  });
+
+  test('二进制校准完成前应先渲染预览并锁定编辑', async () => {
+    // print 立即返回、read 挂起 —— 借此捕捉中间的预览态
+    let releaseRead = null;
+    const slowInvoke = jest.fn((command, args) => {
+      if (command === 'fru list') {
+        return Promise.resolve({
+          code: 0,
+          stdout: 'FRU Device Description : Builtin FRU Device (ID 0)\n',
+          stderr: ''
+        });
+      }
+      if (command === '-v fru print') {
+        return Promise.resolve({ code: 0, stdout: PRINT_V_OUTPUT, stderr: '' });
+      }
+      if (command === 'fru read') {
+        return new Promise(resolve => {
+          releaseRead = () => {
+            const target = args[1];
+            fs.mkdirSync(path.dirname(target), { recursive: true });
+            fs.writeFileSync(target, imageBuffer);
+            resolve({ code: 0, stdout: 'Done\n', stderr: '' });
+          };
+        });
+      }
+      return Promise.resolve({ code: 1, stdout: '', stderr: '' });
+    });
+
+    fruView.initFruPanel({
+      getServer: () => ({ host: '192.168.60.44' }),
+      invoke: slowInvoke,
+      selectDirectory: async () => os.tmpdir(),
+      alert: async () => {}
+    });
+
+    const refreshing = fruView.refresh();
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    // 预览已出来：内容可见，但序号未经校验 → 按钮禁用、无 data-index
+    const previewHtml = el('fru-fields').innerHTML;
+    expect(previewHtml).toContain('Product Extra');
+    expect(previewHtml).toContain('预览 · 序号校准中');
+    expect(previewHtml).toContain('fru-edit-btn" disabled');
+    expect(previewHtml).not.toContain('data-index="7"');
+    expect(el('fru-result').textContent).toContain('正在校准序号');
+
+    releaseRead();
+    await refreshing;
+
+    // 校准完成：按钮解禁并携带可靠序号，meta 回到真实偏移
+    const finalHtml = el('fru-fields').innerHTML;
+    expect(finalHtml).not.toContain('预览 · 序号校准中');
+    expect(finalHtml).toContain('data-index="7"');
+    expect(finalHtml).toContain('偏移 0x');
+    expect(el('fru-result').textContent).toBe('读取成功');
+
+    // 命令形式必须是 `-v fru print`：写成 `fru print -v <id>` 时 ipmitool
+    // 不报错但 stdout 为空，预览会静默失效（真机踩过，mock 测不出来）
+    expect(slowInvoke.mock.calls.some(call => call[0] === '-v fru print')).toBe(true);
+    expect(slowInvoke.mock.calls.some(call => call[0] === 'fru print -v')).toBe(false);
   });
 });

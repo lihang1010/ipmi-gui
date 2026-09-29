@@ -124,7 +124,7 @@ ipmi-gui-electron/
 | `bmcVersion.js` | mc info 版本号解析（按厂商取 Aux 字节） | 见 test_report.md |
 | `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | 见 test_report.md |
 | `favorites.js` | 收藏夹 CRUD/执行/排序 | 见 test_report.md |
-| `fru.js` | FRU 镜像解析 / index 映射 / 命令构建 / 结果与字段比对判定 | 见 fru.test.js |
+| `fru.js` | FRU 镜像与 `fru print` 解析 / index 映射 / 命令构建 / 结果判定 | 见 fru.test.js |
 | `fruView.js` | FRU 字段表渲染 + 写入→重新读取校验编排 | 见 fruView.test.js |
 | `modal.js` | 自定义 alert/confirm 弹窗 | 见 test_report.md |
 | `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证/CIDR 展开 | 见 test_report.md |
@@ -234,12 +234,16 @@ ipmi-gui-electron/
 ### 4.5 FRU 字段读取与编辑
 
 ```
-[刷新 / 读取]
+[刷新 / 读取] → fruView.load() 分两阶段
     │
-    ├── fru list              → fru.parseFruList()       → 顶部下拉选择 FRU 设备
-    └── fru read <id> <file>  → fru.parseFruImage(镜像)  → 字段表
-                                  （index 与 ipmitool 内部字段序完全一致，
-                                    不用 fru print 文本解析——它省略 FRU ID 行会错位）
+    ├── fru list                         → fru.parseFruList()   → 顶部下拉选择 FRU 设备
+    │
+    ├── 1) -v fru print <id>   (~0.4s)   → fru.parseFruPrint()  → 字段表立即可见，编辑锁定
+    │        └── -v 必须写在 fru 之前；`fru print -v <id>` 会静默无输出
+    │
+    └── 2) fru read <id> <file> (~1.2s)  → fru.parseFruImage()  → 权威序号，解锁编辑
+             └── index 与 ipmitool 内部字段序完全一致
+                 （print 会整行跳过空字段，不能按行号数序号）
 
 [编辑某字段] → fruView.planEdit()
     ├── 1) fru edit <id> field <c|b|p> <index>    点「写入」立即下发，新值走 argv
@@ -342,7 +346,7 @@ ipmi-gui-electron/
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 19 个 *.test.js | 478 |
+| 19 个 *.test.js | 490 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 
