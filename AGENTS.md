@@ -160,6 +160,25 @@ BMC 版本号 = `Firmware Revision` + '.' + Aux 字节，取字节规则见 bmcV
 AMI 取 Aux 前 2 字节直接拼接（1.11.1109），openUBMC 取后 2 字节以点分隔（1.11.00.00）。
 ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据不经 shell）。
 
+### 主题（亮色 / 暗色）
+
+主题靠 `<html data-theme="dark|light">` 切换，样式表在 `:root[data-theme='light']` 覆盖
+颜色类 token（见 `style.css`）。纯逻辑在 `src/modules/theme.js`，DOM 操作与持久化在
+`renderer.js` 的 `applyTheme` / `toggleTheme`。
+
+- **入口**：顶栏 `btn-theme-toggle`。选择记在 `settings.theme`，`DOMContentLoaded` 里
+  `loadConfig()` 之后**立即** `applyTheme(getConfig().settings?.theme)`，避免启动闪一下默认暗色
+- **终端**：`createTerminal` 用 `theme.terminalTheme(currentTheme)` 初始化；`applyTheme` 还必须
+  遍历 `solTabs` 更新**已打开**终端的 `options.theme`，否则终端配色会和新主题打架
+- **加新颜色时必须走 token**。尤其 `--tint-subtle/-default/-strong`：暗色主题下是白色低透明
+  （提亮表面），亮色主题下翻成黑色低透明（压暗表面）。hover 底色、斑马纹、滚动条滑块全靠它，
+  写死 `rgba(255,255,255,0.0x)` 在亮色主题下会彻底看不见
+- 只有三类颜色允许写死：**有色按钮上的白字**（`#fff`）、**强调/危险色的半透明装饰**
+  （`rgba(91,155,213,...)` 之类）、**阴影**。语义色按钮的 hover 加深色走
+  `--success-hover` / `--danger-hover` / `--warning-hover`，别直接写十六进制
+- 下拉箭头是内联 SVG data URI，SVG 内部着色用不了 `var()`，所以整条 URI 做成
+  `--select-arrow`，两套主题各给一份
+
 ### FRU 读取与字段编辑 (src/modules/fru.js + fruView.js)
 
 读取分两阶段（见 `fruView.load` + `loadPreview`）：
@@ -244,10 +263,12 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - Node 内置模块用 jest.mock() 行内 mock
 - dgram、net、child_process、fs、path、os 均已 mock
 - fullScan 测试设 30s 超时
+- theme.test.js 覆盖主题归一化 / 切换 / 文案 / 终端配色（纯函数）
+- renderer.test.js 的 `document` 桩必须带 `documentElement`，否则 `applyTheme` 写 `data-theme` 会崩
 - fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
 - fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
 - **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
-- 共 490 用例，19 套件
+- 共 525 用例，20 套件
 
 ---
 

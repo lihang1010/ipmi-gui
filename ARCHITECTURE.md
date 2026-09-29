@@ -125,6 +125,7 @@ ipmi-gui-electron/
 | `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | 见 test_report.md |
 | `favorites.js` | 收藏夹 CRUD/执行/排序 | 见 test_report.md |
 | `fru.js` | FRU 镜像与 `fru print` 解析 / index 映射 / 命令构建 / 结果判定 | 见 fru.test.js |
+| `theme.js` | 主题名归一化 / 一键切换 / 显示名 / 终端配色（纯函数） | 见 theme.test.js |
 | `fruView.js` | FRU 字段表渲染 + 写入→重新读取校验编排 | 见 fruView.test.js |
 | `modal.js` | 自定义 alert/confirm 弹窗 | 见 test_report.md |
 | `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证/CIDR 展开 | 见 test_report.md |
@@ -355,7 +356,7 @@ ipmi-gui-electron/
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 19 个 *.test.js | 490 |
+| 20 个 *.test.js | 525 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 

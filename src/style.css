@@ -5,6 +5,9 @@
 
 /* --- CSS Variables (Design Tokens) --- */
 :root {
+  /* 让原生控件（滚动条、下拉、表单）跟随当前主题 */
+  color-scheme: dark;
+
   /* Core palette */
   --bg-app: #1b1b1f;
   --bg-surface: #232328;
@@ -39,6 +42,11 @@
   --warning: #e0a33e;
   --warning-subtle: rgba(224, 163, 62, 0.12);
 
+  /* 语义色按钮的 hover：两套主题下都应比常态更深 */
+  --success-hover: #3d9a6d;
+  --danger-hover: #cc4450;
+  --warning-hover: #c8922f;
+
   /* Spacing */
   --space-xs: 4px;
   --space-sm: 8px;
@@ -57,6 +65,21 @@
   --shadow-lg: 0 8px 32px rgba(0,0,0,0.5);
   --shadow-glow: 0 0 0 1px var(--border-focus), 0 0 8px rgba(91,155,213,0.25);
 
+  /*
+   * 半透明「提亮 / 压暗」层：hover 底色、斑马纹、滚动条滑块等共用。
+   * 暗色主题下是白色低透明（提亮表面），亮色主题下必须翻成黑色低透明（压暗表面），
+   * 否则这些效果在浅色背景上完全看不出来。
+   */
+  --tint-subtle: rgba(255, 255, 255, 0.03);
+  --tint-default: rgba(255, 255, 255, 0.06);
+  --tint-strong: rgba(255, 255, 255, 0.12);
+
+  /* 比所在表面更「下沉」一块的底色（对话框页脚、差异列表等） */
+  --surface-sunken: rgba(0, 0, 0, 0.15);
+
+  /* 下拉箭头：SVG 内联在 data URI 里，没法用 var() 着色，只能整条替换 */
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239d9da5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+
   /* Transitions */
   --transition-fast: 120ms ease;
   --transition-normal: 200ms ease;
@@ -65,6 +88,61 @@
   /* Font */
   --font-sans: 'Segoe UI', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+}
+
+/*
+ * 亮色主题：只覆盖颜色类 token。
+ * 间距 / 圆角 / 过渡 / 字体与主题无关，不重复声明。
+ * 由 renderer.js 写在 <html data-theme="light"> 上。
+ */
+:root[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-app: #eef0f3;
+  --bg-surface: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-overlay: #f4f6f8;
+  --bg-input: #ffffff;
+  --bg-terminal: #f8f9fb;
+
+  --border-subtle: rgba(22, 30, 42, 0.08);
+  --border-default: rgba(22, 30, 42, 0.13);
+  --border-strong: rgba(22, 30, 42, 0.22);
+  --border-focus: #2f7cbf;
+
+  --text-primary: #1b2027;
+  --text-secondary: #596270;
+  --text-muted: #8b939f;
+  --text-inverse: #ffffff;
+
+  --accent: #2f7cbf;
+  --accent-hover: #2670ad;
+  --accent-active: #1f639a;
+  --accent-subtle: rgba(47, 124, 191, 0.10);
+
+  --success: #2f9e6b;
+  --success-subtle: rgba(47, 158, 107, 0.12);
+  --danger: #cf3b48;
+  --danger-subtle: rgba(207, 59, 72, 0.10);
+  --warning: #b8791a;
+  --warning-subtle: rgba(184, 121, 26, 0.13);
+
+  --success-hover: #26875b;
+  --danger-hover: #b3323e;
+  --warning-hover: #9c6512;
+
+  --tint-subtle: rgba(22, 30, 42, 0.025);
+  --tint-default: rgba(22, 30, 42, 0.05);
+  --tint-strong: rgba(22, 30, 42, 0.11);
+
+  --surface-sunken: rgba(22, 30, 42, 0.04);
+
+  --shadow-sm: 0 1px 2px rgba(22, 30, 42, 0.08);
+  --shadow-md: 0 4px 12px rgba(22, 30, 42, 0.10);
+  --shadow-lg: 0 8px 32px rgba(22, 30, 42, 0.18);
+  --shadow-glow: 0 0 0 1px var(--border-focus), 0 0 8px rgba(47, 124, 191, 0.22);
+
+  --select-arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%23596270' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
 }
 
 /* --- Reset & Base --- */
@@ -139,7 +217,7 @@ body {
   text-overflow: ellipsis;
   cursor: pointer;
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239d9da5' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-image: var(--select-arrow);
   background-repeat: no-repeat;
   background-position: right 8px center;
 }
@@ -271,12 +349,12 @@ body {
   font-family: var(--font-mono);
   padding: 2px 6px;
   border-radius: var(--radius-sm);
-  background: rgba(255,255,255,0.04);
+  background: var(--tint-subtle);
 }
 
 .logdir-display:hover {
   color: var(--text-secondary);
-  background: rgba(255,255,255,0.06);
+  background: var(--tint-default);
 }
 
 /* Favorites Panel */
@@ -307,7 +385,7 @@ body {
 }
 
 .favorite-item:hover {
-  background: rgba(255,255,255,0.05);
+  background: var(--tint-default);
 }
 
 .favorite-item.selected {
@@ -403,7 +481,7 @@ body {
 }
 
 .batch-delete-item:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--tint-subtle);
 }
 
 .batch-delete-item .bd-cb {
@@ -462,7 +540,7 @@ body {
 
 .tab:hover {
   color: var(--text-secondary);
-  background: rgba(255,255,255,0.03);
+  background: var(--tint-subtle);
 }
 
 .tab.active {
@@ -560,7 +638,7 @@ body {
 }
 
 .scan-result-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--tint-subtle);
 }
 
 .scan-result-item.already-exists {
@@ -631,7 +709,7 @@ body {
 }
 
 .scan-status.unknown {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tint-default);
   color: var(--text-muted);
 }
 
@@ -702,7 +780,7 @@ body {
 }
 
 .sol-tab:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--tint-default);
   color: var(--text-secondary);
 }
 
@@ -793,7 +871,7 @@ body {
   left: 0;
   right: 0;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+  background: linear-gradient(90deg, transparent, var(--tint-default), transparent);
   z-index: 1;
   pointer-events: none;
 }
@@ -866,7 +944,7 @@ body {
 }
 
 .btn:hover {
-  background: rgba(255,255,255,0.08);
+  background: var(--tint-default);
   color: var(--text-primary);
   border-color: var(--border-strong);
 }
@@ -909,8 +987,8 @@ body {
 }
 
 .btn-success:hover {
-  background: #3d9a6d;
-  border-color: #3d9a6d;
+  background: var(--success-hover);
+  border-color: var(--success-hover);
   color: #fff;
 }
 
@@ -921,8 +999,8 @@ body {
 }
 
 .btn-danger:hover {
-  background: #cc4450;
-  border-color: #cc4450;
+  background: var(--danger-hover);
+  border-color: var(--danger-hover);
   color: #fff;
 }
 
@@ -933,8 +1011,8 @@ body {
 }
 
 .btn-warning:hover {
-  background: #c8922f;
-  border-color: #c8922f;
+  background: var(--warning-hover);
+  border-color: var(--warning-hover);
   color: var(--text-inverse);
 }
 
@@ -945,7 +1023,7 @@ body {
 }
 
 .btn-ghost:hover {
-  background: rgba(255,255,255,0.06);
+  background: var(--tint-default);
   color: var(--text-primary);
   border-color: transparent;
 }
@@ -1082,7 +1160,7 @@ body.dialog-open .xterm-helper-textarea {
   gap: var(--space-sm);
   padding: var(--space-md) var(--space-lg);
   border-top: 1px solid var(--border-subtle);
-  background: rgba(0,0,0,0.15);
+  background: var(--surface-sunken);
 }
 
 /* --- Form --- */
@@ -1293,7 +1371,7 @@ body.dialog-open .xterm-helper-textarea {
 
 /* 斑马纹：区标题固定占第 1 个子元素，因此奇数列恰好是隔行 */
 .fru-field-row:nth-child(odd) {
-  background: rgba(255, 255, 255, 0.022);
+  background: var(--tint-subtle);
 }
 
 .fru-field-row:hover {
@@ -1549,14 +1627,14 @@ body.dialog-open .xterm-helper-textarea {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.12);
+  background: var(--tint-strong);
   border-radius: 4px;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255,255,255,0.2);
+  background: var(--tint-strong);
   background-clip: padding-box;
 }
 

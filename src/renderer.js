@@ -17,10 +17,13 @@ const favorites = require('./modules/favorites');
 const { renderScanResultRow } = require('./modules/scanResultView');
 const { getCredentialByName } = require('./modules/credentials');
 const fruView = require('./modules/fruView');
+const theme = require('./modules/theme');
 
 // ========== 全局状态 ==========
 let _currentServer = null;
 let editingServerId = null;
+/** 当前主题（'dark' | 'light'），由 applyTheme 维护并持久化到 settings.theme */
+let currentTheme = theme.DEFAULT_THEME;
 
 // SOL 多标签管理
 let solTabs = [];  // [{id, name, server, terminal, fitAddon, serializeAddon, ptyPid, isRunning, logFile}]
@@ -36,6 +39,8 @@ function getActiveTab() { return solTabs.find(t => t.id === activeTabId) || null
 
 document.addEventListener('DOMContentLoaded', () => {
   loadConfig();
+  // 尽早应用已保存的主题，避免启动时先闪一下默认暗色
+  applyTheme(getConfig().settings?.theme);
   updateServerList();
   favorites.loadFavorites();
   bindEvents();
@@ -72,14 +77,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
 function createTerminal(container) {
   const term = new Terminal({
-    theme: {
-      background: '#0d0d10',
-      foreground: '#d4d4d8',
-      cursor: '#e4e4e8',
-      cursorAccent: '#0d0d10',
-      selectionBackground: 'rgba(91, 155, 213, 0.3)',
-      selectionForeground: '#ffffff'
-    },
+    // 终端配色跟随当前主题（见 theme.js 的 TERMINAL_THEMES）
+    theme: theme.terminalTheme(currentTheme),
     fontFamily: "'Cascadia Code', 'JetBrains Mono', 'Fira Code', Consolas, monospace",
     fontSize: 14,
     lineHeight: 1.3,
@@ -284,6 +283,62 @@ function clearCurrentPanel() {
   }
 }
 
+// ========== 主题 ==========
+
+/**
+ * 应用主题
+ *
+ * 做三件事：写 `<html data-theme>`（样式表靠它覆盖 token）、同步所有已打开的
+ * SOL 终端配色、刷新按钮文案；`options.persist` 为真时一并写入配置。
+ *
+ * @param {string} name 主题名，非法值回落到默认主题
+ * @param {{persist?: boolean}} [options]
+ */
+function applyTheme(name, options) {
+  const opts = options || {};
+  currentTheme = theme.normalizeTheme(name);
+
+  document.documentElement.setAttribute('data-theme', currentTheme);
+
+  // 已打开的 SOL 标签也要换配色，否则终端会和新主题打架
+  const palette = theme.terminalTheme(currentTheme);
+  solTabs.forEach(tab => {
+    if (!tab.terminal) return;
+    tab.terminal.options.theme = palette;
+    try {
+      tab.terminal.refresh(0, tab.terminal.rows - 1);
+    } catch (e) {
+      // 终端尺寸尚未就绪时 refresh 会抛，忽略即可
+    }
+  });
+
+  updateThemeButton();
+
+  if (opts.persist) {
+    const config = getConfig();
+    config.settings = config.settings || {};
+    config.settings.theme = currentTheme;
+    saveConfig();
+  }
+}
+
+/** 一键切换亮色 / 暗色，并记住选择 */
+function toggleTheme() {
+  applyTheme(theme.nextTheme(currentTheme), { persist: true });
+}
+
+/** 按钮文案显示当前主题，悬停提示点击后会切到哪个 */
+function updateThemeButton() {
+  const btn = document.getElementById('btn-theme-toggle');
+  if (!btn) return;
+
+  const current = theme.themeLabel(currentTheme);
+  const tooltip = '当前：' + current + '主题，点击切换到' + theme.themeLabel(theme.nextTheme(currentTheme));
+  btn.textContent = current;
+  btn.title = tooltip;
+  btn.dataset.tooltip = tooltip;
+}
+
 // ========== 事件绑定 ==========
 
 function bindEvents() {
@@ -392,6 +447,10 @@ function bindEvents() {
   document.querySelectorAll('.btn-clear').forEach(btn => {
     btn.addEventListener('click', () => clearOutput(btn.dataset.target));
   });
+
+  // 主题切换
+  const themeBtn = document.getElementById('btn-theme-toggle');
+  if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
 
   // 日志目录
   updateLogDirDisplay();

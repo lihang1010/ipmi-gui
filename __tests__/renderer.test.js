@@ -44,6 +44,12 @@ global.document = {
   createElement: jest.fn(() => createMockElement('created')),
   addEventListener: jest.fn(),
   removeEventListener: jest.fn(),
+  // 主题切换会写 <html data-theme>
+  documentElement: {
+    setAttribute: jest.fn(),
+    getAttribute: jest.fn(() => null),
+    removeAttribute: jest.fn()
+  },
   body: {
     appendChild: jest.fn(),
     removeChild: jest.fn()
@@ -601,6 +607,16 @@ describe('Renderer Module', () => {
       domReadyHandlers.forEach(handler => handler());
 
       expect(ipcRenderer.on).toHaveBeenCalledWith('scan:progress', expect.any(Function));
+    });
+
+    test('应在 DOMContentLoaded 时把主题写到 html[data-theme]', () => {
+      document.documentElement.setAttribute.mockClear();
+
+      domReadyHandlers.forEach(handler => handler());
+
+      // 配置里没有 settings.theme 时应落到默认主题
+      expect(document.documentElement.setAttribute)
+        .toHaveBeenCalledWith('data-theme', expect.stringMatching(/^(dark|light)$/));
     });
   });
 
