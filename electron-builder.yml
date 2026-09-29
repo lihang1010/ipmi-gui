@@ -32,7 +32,10 @@ files:
   - "!.workbuddy-ai/**/*"
   - "!example_servers.json"
   - "!build.bat"
-  - "!build-installer.bat"
+  - "!build.ps1"
+  - "!reasonix.toml"
+  - "!.codebuddy/**/*"
+  - "!.github/**/*"
 
 asar: true
 

@@ -3,7 +3,12 @@ Write-Host "=== IPMI GUI Builder ===" -ForegroundColor Cyan
 
 # 1. Kill running app
 Write-Host "`n[1/4] Stopping running app..." -ForegroundColor Yellow
-Get-Process -Name "ipmi-gui","IPMI管理工具","electron","app-builder" -ErrorAction SilentlyContinue | Stop-Process -Force
+Get-Process -Name "IPMI*" -ErrorAction SilentlyContinue | Stop-Process -Force
+# 直接按 electron / app-builder 名字杀会连带干掉机器上所有其它 Electron 应用
+# （编辑器、聊天工具等），所以只结束路径属于本项目的那些。
+Get-Process -Name "electron","app-builder" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Path -and $_.Path -like "*ipmi-gui*" } |
+    Stop-Process -Force
 
 # 2. Clean
 Write-Host "[2/4] Cleaning..." -ForegroundColor Yellow

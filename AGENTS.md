@@ -25,14 +25,15 @@ ipmi-gui-electron/
 ├── main.js                  # Electron 主进程
 ├── package.json
 ├── electron-builder.yml     # 打包配置
-├── build.ps1 / build.bat    # 构建脚本
+├── build.ps1                # 构建可发布包（NSIS + 免安装 + latest.yml）
+├── build.bat                # 仅本地自测（--dir，不含自动更新产物）
 ├── AGENTS.md                # 本文件
 ├── bin/                     # ipmitool.exe + Cygwin DLL
 ├── assets/icon.ico          # 应用图标
 ├── src/
 │   ├── index.html           # 主界面
 │   ├── renderer.js          # 渲染进程核心
-│   ├── style.css            # 暗色主题样式系统
+│   ├── style.css            # 主题样式系统（暗/亮双主题，全部 token 化）
 │   ├── config/ipmi-credentials.json  # 默认凭据唯一来源
 │   └── modules/
 │       ├── configStore.js   # 配置读写 (唯一实现)
@@ -285,8 +286,18 @@ powershell build.ps1 # 构建（NSIS 安装包 + 免安装版 + 自动更新清�
   与 `ipmi-gui-<ver>-portable.exe`（免安装绿色版）
 - `bin/` 由 electron-builder 的 `extraResources` 复制到 `resources/bin`，
   构建脚本只做存在性校验（不再手动 Copy-Item）
-- **不要再用 `--dir` 构建**：它只产 `win-unpacked`，既没有安装包也不生成 `latest.yml`，
-  自动更新会失效
+- **构建入口别用混**（三者产物完全不同，选错就会发布出收不到更新的包）：
+  - `build.ps1` → `ipmi-gui-<ver>-win-x64.exe`(NSIS) + `-portable.exe` + `latest.yml`
+    —— 只有它能产出可发布的包
+  - `build.bat` → 仅 `dist/win-unpacked/`，**纯本地自测**；产物不含 `latest.yml`，
+    装上去永远收不到自动更新。脚本头部有注释说明
+  - 正式发布**不用本地脚本**：改 version → 推 `v<version>` tag 交给 CI（见下节）
+- 已删除 `build-installer.bat`：它用 `nsis --prepackaged` 且**没有 `--publish never`**，
+  本地存在 tag 时可能触发上传；功能与 `build.ps1` 重复，故移除
+- `files` 排除清单（**与 `.gitignore` 是两套，新增开发期文件时两边都要看**）：
+  `build.bat` / `build.ps1` / `reasonix.toml` / `.codebuddy/` / `.github/` /
+  `__tests__/` / `coverage/` / `bin/` / `example_servers.json`。
+  漏一个（如 `reasonix.toml`）它就会被打进 `app.asar`
 
 ### 自动更新（NSIS + electron-updater）
 
@@ -325,6 +336,15 @@ powershell build.ps1 # 构建（NSIS 安装包 + 免安装版 + 自动更新清�
 `build.ps1` 里有中文（进程名 `IPMI管理工具` 等）。PowerShell 5.1 对**无 BOM** 的文件按
 系统 ANSI（GBK）解码，中文字节会错位并**吃掉后面的引号**，直接导致语法错误、
 整个脚本无法运行。一旦用会把 BOM 丢掉的工具编辑过，确认前 3 字节仍是 `ef bb bf`。
+
+### 陷阱：build.bat 必须保持纯 ASCII
+
+`build.bat` 由 `cmd.exe` 按系统 ANSI（GBK）解码，写中文会显示成乱码；GBK 解码还可能
+连同换行/引号一起吞掉。所以这个文件**全用英文注释**。
+
+另外它杀进程用的是通配符 `taskkill /f /im IPMI*.exe` —— 实际 exe 名是中文 productName
+（`IPMI管理工具.exe`），旧写法 `ipmi-gui.exe` 从未匹配上，"停止运行中的应用"这一步
+一直是个空操作。
 
 ---
 
