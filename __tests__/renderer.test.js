@@ -618,6 +618,15 @@ describe('Renderer Module', () => {
       expect(document.documentElement.setAttribute)
         .toHaveBeenCalledWith('data-theme', expect.stringMatching(/^(dark|light)$/));
     });
+
+    test('应在 DOMContentLoaded 时拉取应用版本', () => {
+      ipcRenderer.invoke.mockClear();
+
+      domReadyHandlers.forEach(handler => handler());
+
+      // 版本号必须来自主进程的 app.getVersion()，与自动更新的比对基准同源
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('app:getVersion');
+    });
   });
 
   describe('IPC Listeners', () => {

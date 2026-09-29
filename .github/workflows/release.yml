@@ -1,0 +1,55 @@
+name: Release
+
+# 打一个与 package.json 版本一致的 tag 即可触发，例如：
+#   git tag v1.0.1
+#   git push origin v1.0.1
+on:
+  push:
+    tags:
+      - 'v*'
+
+# GITHUB_TOKEN 默认只有只读权限，创建 Release 必须显式提权
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      # electron-updater 拿 release 的 tag 当版本号，与客户端的 app.getVersion()
+      # 比对。tag 少了 v、或与 package.json 版本不一致，就会出现「检测到新版本
+      # 却永远装不上」。这里提前拦住。
+      - name: 校验 tag 与 package.json 版本一致
+        shell: bash
+        run: |
+          PKG="v$(node -p "require('./package.json').version")"
+          if [ "$PKG" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME 与 package.json 的版本 $PKG 不一致"
+            exit 1
+          fi
+          echo "版本校验通过：$PKG"
+
+      # node-pty 是原生模块，electron-builder 会在打包时自行 rebuild
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 代码检查
+        run: npm run lint
+
+      - name: 单元测试
+        run: npm test
+
+      # --publish always 是必需的：CI 环境下 electron-builder 的默认策略是
+      # onTagOrDraft，只在「已存在 draft release」时才上传，不会自己创建 Release
+      - name: 构建并发布到 GitHub Releases
+        run: npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

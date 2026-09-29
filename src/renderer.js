@@ -18,6 +18,7 @@ const { renderScanResultRow } = require('./modules/scanResultView');
 const { getCredentialByName } = require('./modules/credentials');
 const fruView = require('./modules/fruView');
 const theme = require('./modules/theme');
+const { describeUpdate } = require('./modules/updateStatus');
 
 // ========== 全局状态 ==========
 let _currentServer = null;
@@ -69,6 +70,13 @@ document.addEventListener('DOMContentLoaded', () => {
     showStatus('disconnected', `SOL 已退出 (代码: ${exitCode})`);
     updateSolButtons();
   });
+
+  // 自动更新：先主动拉一次状态（主进程推送时窗口可能尚未加载完），再订阅后续变化
+  ipcRenderer.invoke('update:getStatus').then(renderUpdateBadge).catch(() => {});
+  ipcRenderer.on('update:status', (event, status) => renderUpdateBadge(status));
+
+  // 版本号
+  ipcRenderer.invoke('app:getVersion').then(renderVersionBadge).catch(() => {});
 });
 
 // ========== 终端 ==========
@@ -339,6 +347,80 @@ function updateThemeButton() {
   btn.dataset.tooltip = tooltip;
 }
 
+// ========== 自动更新 ==========
+
+/**
+ * 渲染顶栏版本徽标
+ *
+ * 版本号取自主进程的 app.getVersion()（即 package.json 的 version），
+ * 与自动更新比对用的基准是同一个来源，不会出现"显示 1.0.0、实际按 1.0.1 比对"的错位。
+ * tooltip 顺带带上 Electron 版本，排查环境问题时报这个就够了。
+ */
+function renderVersionBadge(version) {
+  const btn = document.getElementById('app-version');
+  if (!btn) return;
+
+  const v = version || '未知';
+  const electron = (process.versions && process.versions.electron) || '-';
+
+  btn.textContent = 'v' + v;
+  const tooltip = '当前版本 v' + v + '\nElectron ' + electron + '\n点击检查更新';
+  btn.title = tooltip;
+  btn.dataset.tooltip = tooltip;
+}
+
+/** 点击版本号 = 手动检查一次更新 */
+async function handleVersionClick() {
+  const status = await ipcRenderer.invoke('update:check');
+  if (status && status.state === 'skipped') {
+    await safeAlert('开发模式（未打包）不检查更新。\n\n' + (status.reason || ''));
+  }
+}
+
+/** 渲染顶栏更新徽标：文案 / tooltip / 可点击性 / 配色全部由 describeUpdate 决定 */
+function renderUpdateBadge(status) {
+  const btn = document.getElementById('btn-update');
+  if (!btn) return;
+
+  const view = describeUpdate(status);
+
+  btn.style.display = view.hidden ? 'none' : '';
+  btn.textContent = view.text;
+  btn.title = view.tooltip;
+  btn.dataset.tooltip = view.tooltip;
+  btn.dataset.actionable = view.actionable ? '1' : '0';
+  btn.disabled = !view.actionable;
+  btn.className = 'btn btn-sm btn-ghost update-badge' + (view.tone === 'idle' ? '' : ' ' + view.tone);
+}
+
+/**
+ * 点击更新徽标：可安装就确认后重启安装，否则重试检查
+ *
+ * 重启会掐断正在跑的 SOL 会话与命令，所以必须由用户明确确认 —— 绝不能自动 quitAndInstall。
+ */
+async function handleUpdateClick() {
+  const btn = document.getElementById('btn-update');
+  if (!btn || btn.dataset.actionable !== '1') return;
+
+  const status = await ipcRenderer.invoke('update:getStatus');
+
+  if (status && status.state === 'ready') {
+    const ok = await safeConfirm(
+      '新版本已下载完成，现在重启并安装？\n\n注意：重启会断开当前所有 SOL 会话。'
+    );
+    if (!ok) return;
+
+    const result = await ipcRenderer.invoke('update:install');
+    if (!result || !result.ok) {
+      await safeAlert('启动安装失败：' + ((result && result.error) || '未知错误'));
+    }
+    return;
+  }
+
+  // error 状态下点击 = 重试
+  await ipcRenderer.invoke('update:check');
+}
+
 // ========== 事件绑定 ==========
 
 function bindEvents() {
@@ -451,6 +533,14 @@ function bindEvents() {
   // 主题切换
   const themeBtn = document.getElementById('btn-theme-toggle');
   if (themeBtn) themeBtn.addEventListener('click', toggleTheme);
+
+  // 自动更新
+  const updateBtn = document.getElementById('btn-update');
+  if (updateBtn) updateBtn.addEventListener('click', handleUpdateClick);
+
+  // 版本号：点击手动检查更新
+  const versionBtn = document.getElementById('app-version');
+  if (versionBtn) versionBtn.addEventListener('click', handleVersionClick);
 
   // 日志目录
   updateLogDirDisplay();

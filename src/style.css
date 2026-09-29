@@ -338,6 +338,29 @@ body {
   background: var(--danger);
 }
 
+/* Application version badge */
+.version-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: var(--font-mono);
+  background: var(--bg-overlay);
+  color: var(--text-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: pointer;
+  transition: all var(--transition-normal);
+}
+
+.version-badge:hover {
+  background: var(--accent-subtle);
+  color: var(--accent);
+}
+
 /* Log directory display */
 .logdir-display {
   max-width: 250px;
@@ -1606,6 +1629,25 @@ body.dialog-open .xterm-helper-textarea {
   margin-top: var(--space-md);
   border-top-color: rgba(224, 85, 97, 0.3);
   color: var(--danger);
+}
+
+/* 自动更新徽标：平时不占位，只有需要用户操作时才显示强调色 */
+.update-badge.ready {
+  color: var(--success);
+  border-color: rgba(76, 175, 124, 0.35);
+}
+
+.update-badge.ready:hover {
+  background: var(--success-subtle);
+}
+
+.update-badge.error {
+  color: var(--danger);
+  border-color: rgba(224, 85, 97, 0.35);
+}
+
+.update-badge.error:hover {
+  background: var(--danger-subtle);
 }
 
 @media (max-width: 900px) {

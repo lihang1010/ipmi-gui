@@ -1,4 +1,5 @@
 const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
@@ -55,6 +56,9 @@ ipcMain.handle('app:getMemory', () => {
     external: Math.round(mem.external / 1024 / 1024)
   };
 });
+
+// 当前应用版本（取自 package.json 的 version，自动更新也以它作为比对基准）
+ipcMain.handle('app:getVersion', () => app.getVersion());
 
 // 配置读写统一由渲染进程的 src/modules/configStore.js 负责
 // （路径 %APPDATA%/ipmi-gui/config.json），主进程不再维护第二份实现
@@ -277,9 +281,105 @@ ipcMain.handle('scan:stop', () => {
   return { success: true };
 });
 
+// ========== 自动更新 ==========
+
+/**
+ * 当前更新状态
+ *
+ * 流转：idle → checking → available → downloading → ready
+ *                          ↘ none（已是最新）
+ *      任意阶段出错 → error；未打包运行 → skipped
+ * 渲染进程既可在启动时用 update:getStatus 拉取，也会收到 update:status 推送。
+ */
+let updateStatus = { state: 'idle' };
+
+/** 更新状态变化时通知渲染进程（窗口还没建好时只记录，由渲染进程主动拉取） */
+function pushUpdateStatus(patch) {
+  updateStatus = Object.assign({}, updateStatus, patch);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('update:status', updateStatus);
+  }
+}
+
+/**
+ * 接线 electron-updater
+ *
+ * - 发现新版本后**自动后台下载**，但**不自动安装**。SOL 会话和正在执行的命令经不起
+ *   重启，何时重启交给用户在顶栏决定。`autoInstallOnAppQuit` 保持默认，用户正常退出
+ *   时会顺带装上，这条路径是无感的
+ * - 任何失败都只更新状态，**绝不阻塞启动** —— 内网更新源不可达是常态
+ */
+function setupAutoUpdater() {
+  if (!app.isPackaged) {
+    pushUpdateStatus({ state: 'skipped', reason: '开发模式（未打包）跳过更新检查' });
+    return;
+  }
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.autoRunAppAfterInstall = true;
+
+  autoUpdater.on('checking-for-update', () => pushUpdateStatus({ state: 'checking' }));
+  autoUpdater.on('update-available', (info) => pushUpdateStatus({ state: 'available', version: info.version }));
+  autoUpdater.on('update-not-available', (info) => pushUpdateStatus({ state: 'none', version: info && info.version }));
+  autoUpdater.on('download-progress', (progress) => {
+    pushUpdateStatus({ state: 'downloading', percent: Math.round(progress.percent) });
+  });
+  autoUpdater.on('update-downloaded', (info) => pushUpdateStatus({ state: 'ready', version: info.version }));
+  autoUpdater.on('error', (err) => {
+    pushUpdateStatus({ state: 'error', error: (err && err.message) || String(err) });
+  });
+
+  // 延迟几秒，避开启动时读取服务器列表 / FRU 的流量
+  setTimeout(() => {
+    autoUpdater.checkForUpdates().catch(() => {
+      // 失败已由 error 事件接管，这里只是避免未处理的 rejection
+    });
+  }, 5000);
+}
+
+ipcMain.handle('update:getStatus', () => updateStatus);
+
+ipcMain.handle('update:check', async () => {
+  if (!app.isPackaged) return updateStatus;
+  try {
+    await autoUpdater.checkForUpdates();
+  } catch (err) {
+    pushUpdateStatus({ state: 'error', error: err.message });
+  }
+  return updateStatus;
+});
+
+ipcMain.handle('update:install', () => {
+  if (updateStatus.state !== 'ready') {
+    return { ok: false, error: '还没有可安装的更新' };
+  }
+  // isSilent=false：配置里 nsis.oneClick 为 false，交给安装向导更可靠
+  // isForceRunAfter=true：装完自动把应用拉起来
+  setImmediate(() => autoUpdater.quitAndInstall(false, true));
+  return { ok: true };
+});
+
+// ========== 单实例 ==========
+
+// 更新重启与重复双击都不该开出第二个窗口；拿不到锁的实例直接退出
+// （app.quit() 是异步的，下面的 whenReady 可能仍被登记，但进程会随即结束）
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+}
+
 // ========== 生命周期 ==========
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => {
+  createWindow();
+  setupAutoUpdater();
+});
 
 app.on('window-all-closed', () => {
   // 关闭所有 pty 进程

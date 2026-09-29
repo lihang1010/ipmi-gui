@@ -264,11 +264,12 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - dgram、net、child_process、fs、path、os 均已 mock
 - fullScan 测试设 30s 超时
 - theme.test.js 覆盖主题归一化 / 切换 / 文案 / 终端配色（纯函数）
+- updateStatus.test.js 覆盖更新状态的文案 / 可点击性 / 可见性映射（纯函数）
 - renderer.test.js 的 `document` 桩必须带 `documentElement`，否则 `applyTheme` 写 `data-theme` 会崩
 - fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
 - fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
 - **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
-- 共 525 用例，20 套件
+- 共 535 用例，21 套件
 
 ---
 
@@ -276,13 +277,54 @@ npm run lint                # ESLint 9 (eslint.config.js)
 
 ```bash
 npm start            # 开发
-powershell build.ps1 # 构建
+powershell build.ps1 # 构建（NSIS 安装包 + 免安装版 + 自动更新清单）
 ```
 
 - 需管理员权限运行
-- 解压即用，无安装过程
+- 现在有两种交付形态：`ipmi-gui-<ver>-win-x64.exe`（NSIS 安装版，走自动更新）
+  与 `ipmi-gui-<ver>-portable.exe`（免安装绿色版）
 - `bin/` 由 electron-builder 的 `extraResources` 复制到 `resources/bin`，
   构建脚本只做存在性校验（不再手动 Copy-Item）
+- **不要再用 `--dir` 构建**：它只产 `win-unpacked`，既没有安装包也不生成 `latest.yml`，
+  自动更新会失效
+
+### 自动更新（NSIS + electron-updater）
+
+- 更新源是 **GitHub Releases**（`publish.provider: github`，仓库 `lihang1010/ipmi-gui`，
+  已确认 public，客户端无需任何凭据）。
+  **发布流程**：改 `package.json` 的 version → 提交 → 打 `v<version>` tag 推到 GitHub →
+  `.github/workflows/release.yml` 自动 lint / test / 构建并发布 Release
+- **`publish.releaseType` 必须显式写 `release`**。默认是 `draft`，而草稿不会出现在
+  `releases/latest` 里，客户端会一直显示「已是最新」，**构建日志完全看不出问题**
+- 同理 CI 里必须显式 `--publish always`：CI 环境下 electron-builder 的默认策略是
+  `onTagOrDraft`（见 `app-builder-lib/out/publish/PublishManager.js`），
+  只在「已存在 draft release」时才上传，**不会自己创建 Release**
+- **tag 必须形如 `v<package.json 的 version>`**：electron-updater 拿 release 的 tag 当
+  版本号，与客户端的 `app.getVersion()` 比对；tag 少了 `v` 或版本不一致，就会出现
+  「检测到新版本却永远装不上」。workflow 里有一道专门的校验，不一致直接失败
+- 对 `github.com`，electron-updater **刻意不请求 `api.github.com`**（避免限流），
+  而是请求 `github.com/<owner>/<repo>/releases/latest`
+- `artifactName` **刻意用 ASCII**：`latest.yml` 里的 url 直接取自它，一旦将来换成
+  generic 更新源（内网 HTTP / 对象存储），中文名经 URL 编码后可能被反向代理解不出来，
+  更新会静默失败。安装向导与快捷方式仍显示中文
+- 客户端行为：启动 5 秒后检查 → 发现新版**自动后台下载** → 下载完成才在顶栏出现
+  「重启更新到 vX.Y.Z」→ **由用户确认后**才 `quitAndInstall`。**绝不能自动重启**：
+  SOL 会话与正在执行的命令经不起中断（`autoInstallOnAppQuit` 保持默认，用户正常退出
+  时会顺带装上，这条路径是无感的）
+- 文案集中在 `src/modules/updateStatus.js` 的 `describeUpdate`（纯函数），主进程只把
+  electron-updater 的事件归一化成 `{state, version, percent, error}`
+- 顶栏 `app-version` 徽标显示当前版本，**来源同为 `app.getVersion()`**（IPC `app:getVersion`），
+  与更新比对的基准同源，不会出现"显示 1.0.0、实际按 1.0.1 比对"的错位；
+  点击它可手动检查更新（开发模式下会明确提示不检查）
+- 开发模式（`!app.isPackaged`）跳过检查；任何失败只更新状态，**不阻塞启动** ——
+  内网更新源不可达是常态
+- 主进程已加 `app.requestSingleInstanceLock()`：更新重启与重复双击都不该开出第二个窗口
+
+### 陷阱：build.ps1 必须保持 UTF-8 BOM
+
+`build.ps1` 里有中文（进程名 `IPMI管理工具` 等）。PowerShell 5.1 对**无 BOM** 的文件按
+系统 ANSI（GBK）解码，中文字节会错位并**吃掉后面的引号**，直接导致语法错误、
+整个脚本无法运行。一旦用会把 BOM 丢掉的工具编辑过，确认前 3 字节仍是 `ef bb bf`。
 
 ---
 

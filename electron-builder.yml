@@ -3,6 +3,22 @@ productName: IPMI管理工具
 directories:
   output: dist
 
+# 自动更新源：GitHub Releases
+#
+# 客户端（electron-updater）会请求 github.com/<owner>/<repo>/releases/latest 取最新的
+# 正式 release（对 github.com 刻意不走 api.github.com，避免限流），因此这里
+# **必须** releaseType: release —— 默认值是 draft，草稿不会出现在 releases/latest 里，
+# 客户端会一直显示「已是最新」，且构建日志不会报任何错。
+#
+# 仓库已确认是 public，客户端无需任何凭据即可下载附件。
+# 若以后改为 private：绝不能把 token 内嵌进客户端（那等于公开分发仓库凭据），
+# 而应另建一个 public 的空仓库专门放 Release，再改这里的 repo。
+publish:
+  provider: github
+  owner: lihang1010
+  repo: ipmi-gui
+  releaseType: release
+
 files:
   - "**/*"
   - "!node_modules/.cache/**/*"
@@ -37,7 +53,10 @@ win:
       arch:
         - x64
   icon: assets/icon.ico
-  artifactName: "${productName}-${version}-win-${arch}.${ext}"
+  # 刻意用 ASCII 文件名：latest.yml 里的 url 直接取自它，中文名经 URL 编码后
+  # 部分反向代理 / 旧 IIS 解不出来，自动更新会静默失败。
+  # 安装向导、桌面快捷方式与窗口标题仍用中文 productName，不影响观感。
+  artifactName: "ipmi-gui-${version}-win-${arch}.${ext}"
 
 nsis:
   oneClick: false
@@ -48,4 +67,4 @@ nsis:
   shortcutName: IPMI管理工具
 
 portable:
-  artifactName: "${productName}-${version}-portable.${ext}"
+  artifactName: "ipmi-gui-${version}-portable.${ext}"
