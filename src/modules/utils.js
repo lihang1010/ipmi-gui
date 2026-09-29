@@ -41,7 +41,6 @@ function clearOutput(elementId) {
   const defaults = {
     'output-power': '点击按钮执行命令...',
     'output-sensor': '点击刷新获取传感器数据...',
-    'output-fru': '点击刷新获取 FRU 信息...',
     'output-sel': '点击刷新获取事件日志...',
     'output-user': '点击刷新获取用户列表...',
     'output-network': '点击刷新获取网络配置...',

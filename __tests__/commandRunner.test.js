@@ -44,7 +44,16 @@ describe('CommandRunner Module', () => {
       const server = { id: '1', name: 'Test', host: '192.168.1.1' };
       const result = await commandRunner.executeCommand('power status', 'output-power', server);
       expect(result.code).toBe(0);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power status');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power status', []);
+    });
+
+    test('should pass extra argv as-is without splitting on spaces', async () => {
+      const el = { textContent: '', style: {} };
+      document.getElementById = jest.fn(() => el);
+      const server = { id: '1' };
+      await commandRunner.executeCommand('fru edit 0 field p 7', 'output-fru', server, ['Rack Server "BBB"']);
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith(
+        'ipmi:execute', server, 'fru edit 0 field p 7', ['Rack Server "BBB"']);
     });
 
     test('should show alert when no server', async () => {
@@ -108,25 +117,25 @@ describe('CommandRunner Module', () => {
     test('should execute power status', async () => {
       const server = { id: '1' };
       await commandRunner.executePower('status', server);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power status');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power status', []);
     });
 
     test('should execute power on', async () => {
       const server = { id: '1' };
       await commandRunner.executePower('on', server);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power on');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power on', []);
     });
 
     test('should execute power off', async () => {
       const server = { id: '1' };
       await commandRunner.executePower('off', server);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power off');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power off', []);
     });
 
     test('should execute power cycle', async () => {
       const server = { id: '1' };
       await commandRunner.executePower('cycle', server);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power cycle');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'power cycle', []);
     });
   });
 
@@ -134,7 +143,7 @@ describe('CommandRunner Module', () => {
     test('should execute sdr list', async () => {
       const server = { id: '1' };
       await commandRunner.executeSensor(server);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'sdr list');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'sdr list', []);
     });
   });
 
@@ -146,7 +155,7 @@ describe('CommandRunner Module', () => {
       });
       const server = { id: '1' };
       await commandRunner.executeRawCommand(server);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'raw 6 1');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'raw 6 1', []);
     });
 
     test('should show alert when command is empty', async () => {
@@ -176,7 +185,7 @@ describe('CommandRunner Module', () => {
       });
       const server = { id: '1' };
       await commandRunner.executeRawCommand(server);
-      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'raw 6 1');
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('ipmi:execute', server, 'raw 6 1', []);
     });
   });
 });

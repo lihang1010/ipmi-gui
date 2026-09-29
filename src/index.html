@@ -198,11 +198,29 @@
       <!-- FRU Panel -->
       <div id="panel-fru" class="panel">
         <div class="panel-toolbar">
-          <button id="btn-fru-refresh" class="btn btn-primary">刷新数据</button>
-          <span class="separator"></span>
-          <button class="btn btn-ghost btn-clear" data-target="output-fru">清屏</button>
+          <span class="fru-toolbar-label">FRU</span>
+          <select id="fru-select" class="fru-select" title="选择要读取 / 编辑的 FRU 设备"></select>
+          <button id="btn-fru-refresh" class="btn btn-primary" title="重新列出 FRU 设备并读取当前设备字段">刷新</button>
+          <button id="btn-fru-backup" class="btn">导出备份</button>
         </div>
-        <pre id="output-fru" class="output-area">点击刷新获取 FRU 信息...</pre>
+
+        <div class="fru-summary">
+          <span class="fru-summary-title" id="fru-summary-title">尚未读取</span>
+          <span class="fru-summary-meta" id="fru-summary-meta"></span>
+          <span class="fru-summary-result" id="fru-result"></span>
+        </div>
+
+        <div class="fru-head-wrap">
+          <div class="fru-table-head" id="fru-table-head" style="display: none;">
+            <span>字段</span>
+            <span>当前值</span>
+            <span>操作</span>
+          </div>
+        </div>
+
+        <div class="fru-fields" id="fru-fields">
+          <div class="fru-placeholder">点击「刷新 / 读取」读取 FRU：先取回原始镜像（同时作为备份源），再解析出可编辑字段</div>
+        </div>
       </div>
 
       <!-- SEL Panel -->
@@ -301,6 +319,40 @@
       <div class="dialog-footer">
         <button class="btn" id="server-cancel">取消</button>
         <button class="btn btn-primary" id="server-save">确定</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FRU Field Edit Dialog -->
+  <div id="fru-dialog" class="dialog-overlay" style="display: none;">
+    <div class="dialog fru-dialog">
+      <div class="dialog-header">
+        <h3>编辑 FRU 字段</h3>
+        <button class="dialog-close" id="fru-dialog-close">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <div class="form-group">
+          <label>区域 / 字段</label>
+          <div class="fru-readonly" id="fru-dialog-target"></div>
+        </div>
+        <div class="form-group">
+          <label>当前值</label>
+          <div class="fru-readonly fru-readonly-mono" id="fru-dialog-current"></div>
+        </div>
+        <div class="form-group">
+          <label>新值（仅可打印 ASCII，最长 63 字节）</label>
+          <input type="text" id="fru-dialog-value" maxlength="63" autocomplete="off" spellcheck="false" placeholder="输入新的字段值">
+          <div class="fru-validate" id="fru-dialog-validate"></div>
+        </div>
+        <div class="fru-note">点击「写入」立即下发到设备，随后自动重新读取确认。如需留存原始数据，可先用「导出备份」。</div>
+        <div class="fru-progress" id="fru-dialog-progress" style="display: none;">
+          <span class="fru-spinner"></span>
+          <span class="fru-progress-text" id="fru-dialog-progress-text"></span>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn" id="fru-dialog-cancel">取消</button>
+        <button class="btn btn-primary" id="fru-dialog-save">写入</button>
       </div>
     </div>
   </div>

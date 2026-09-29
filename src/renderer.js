@@ -16,6 +16,7 @@ const { executeCommand, executePower, executeSensor, executeRawCommand } = requi
 const favorites = require('./modules/favorites');
 const { renderScanResultRow } = require('./modules/scanResultView');
 const { getCredentialByName } = require('./modules/credentials');
+const fruView = require('./modules/fruView');
 
 // ========== 全局状态 ==========
 let _currentServer = null;
@@ -265,7 +266,7 @@ function refreshCurrentPanel() {
   const server = getCurrentServer();
   if (tab === 'power') executePower('status', server);
   else if (tab === 'sensor') executeSensor(server);
-  else if (tab === 'fru') executeCommand('fru list', 'output-fru', server);
+  else if (tab === 'fru') fruView.refresh();
   else if (tab === 'sel') executeCommand('sel list', 'output-sel', server);
   else if (tab === 'user') executeCommand('user list', 'output-user', server);
   else if (tab === 'network') executeCommand('lan print', 'output-network', server);
@@ -298,6 +299,9 @@ function bindEvents() {
           const activeTab = getActiveTab();
           if (activeTab && activeTab.fitAddon) activeTab.fitAddon.fit();
         }, 100);
+      } else if (tab.dataset.tab === 'fru') {
+        // 首次切入 FRU 面板时惰性读取一次
+        fruView.ensureLoaded();
       }
     });
   });
@@ -359,8 +363,13 @@ function bindEvents() {
   // 传感器按钮
   document.getElementById('btn-sensor-refresh').addEventListener('click', () => executeSensor(getCurrentServer()));
 
-  // FRU 按钮
-  document.getElementById('btn-fru-refresh').addEventListener('click', () => executeCommand('fru list', 'output-fru', getCurrentServer()));
+  // FRU 面板：刷新 / 导出备份 / 字段编辑的按钮与对话框事件由 fruView 统一绑定
+  fruView.initFruPanel({
+    getServer: getCurrentServer,
+    invoke: (command, args) => ipcRenderer.invoke('ipmi:execute', getCurrentServer(), command, args || []),
+    selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
+    alert: safeAlert
+  });
 
   // SEL 按钮
   document.getElementById('btn-sel-refresh').addEventListener('click', () => executeCommand('sel list', 'output-sel', getCurrentServer()));

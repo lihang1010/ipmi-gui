@@ -8,8 +8,14 @@ const { formatCommandOutput } = require('./utils');
 
 /**
  * 执行 IPMI 命令
+ *
+ * @param {string} command 命令串（会被 tokenizeCommand 分词，支持引号）
+ * @param {string} outputId 展示输出的元素 id
+ * @param {object} currentServer 服务器配置
+ * @param {string[]} [args] 附加 argv，拼在 command 分词之后，原样传给 spawn
+ *        —— 传含空格 / 引号 / 特殊字符的值时走这里，不要拼进 command
  */
-async function executeCommand(command, outputId, currentServer) {
+async function executeCommand(command, outputId, currentServer, args) {
   if (!currentServer) {
     await safeAlert('请先选择服务器');
     return;
@@ -22,7 +28,7 @@ async function executeCommand(command, outputId, currentServer) {
   }
 
   try {
-    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, command);
+    const result = await ipcRenderer.invoke('ipmi:execute', currentServer, command, args || []);
     if (el) {
       el.textContent = formatCommandOutput(result);
       el.style.opacity = '1';

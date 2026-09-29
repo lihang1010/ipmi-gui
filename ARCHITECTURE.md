@@ -22,6 +22,8 @@ ipmi-gui-electron/
 │       ├── bmcVersion.js      # mc info 版本号解析
 │       ├── commandRunner.js   # 命令执行封装
 │       ├── favorites.js       # 收藏夹
+│       ├── fru.js             # FRU 镜像解析 / 命令构建 / 结果判定（纯函数）
+│       ├── fruView.js         # FRU 面板渲染与写入编排（写入→重新读取校验）
 │       ├── modal.js           # 模态对话框
 │       ├── networkScanner.js  # 网络扫描
 │       ├── scanResultView.js  # 扫描结果行渲染（纯函数）
@@ -34,7 +36,7 @@ ipmi-gui-electron/
 │   ├── cygcrypto-1.0.0.dll
 │   └── cygz.dll
 │
-├── __tests__/                 # 单元测试 (16 套件)
+├── __tests__/                 # 单元测试 (19 套件)
 ├── assets/
 │   └── icon.ico               # 应用图标
 └── dist/                      # 构建产物 (win-unpacked + 安装包)
@@ -71,8 +73,8 @@ ipmi-gui-electron/
 ├─────────────────────────────────────────────────────────────────┤
 │                   业务逻辑模块 (src/modules/)                     │
 │  configStore / ipmiTool / credentials / commandRunner /          │
-│  favorites / modal / networkScanner / scanResultView /           │
-│  templates / utils                                               │
+│  favorites / fru / fruView / modal / networkScanner /            │
+│  scanResultView / templates / utils                              │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -122,6 +124,8 @@ ipmi-gui-electron/
 | `bmcVersion.js` | mc info 版本号解析（按厂商取 Aux 字节） | 见 test_report.md |
 | `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | 见 test_report.md |
 | `favorites.js` | 收藏夹 CRUD/执行/排序 | 见 test_report.md |
+| `fru.js` | FRU 镜像解析 / index 映射 / 命令构建 / 结果与字段比对判定 | 见 fru.test.js |
+| `fruView.js` | FRU 字段表渲染 + 写入→重新读取校验编排 | 见 fruView.test.js |
 | `modal.js` | 自定义 alert/confirm 弹窗 | 见 test_report.md |
 | `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证/CIDR 展开 | 见 test_report.md |
 | `scanResultView.js` | 扫描结果行渲染（转义 + 事件委托） | 新增 |
@@ -227,6 +231,27 @@ ipmi-gui-electron/
             └── 返回结果 → renderScanResults() → scanResultView.js 渲染行
 ```
 
+### 4.5 FRU 字段读取与编辑
+
+```
+[刷新 / 读取]
+    │
+    ├── fru list              → fru.parseFruList()       → 顶部下拉选择 FRU 设备
+    └── fru read <id> <file>  → fru.parseFruImage(镜像)  → 字段表
+                                  （index 与 ipmitool 内部字段序完全一致，
+                                    不用 fru print 文本解析——它省略 FRU ID 行会错位）
+
+[编辑某字段] → fruView.planEdit()
+    ├── 1) fru edit <id> field <c|b|p> <index>    点「写入」立即下发，新值走 argv
+    └── 2) 重新 fru read → verifyFieldValue() 比对字段值
+             └── 同时校验 ipmitool 报告的旧值与预期一致（防止改错字段）
+```
+
+> `fru edit` **成功时退出码为 1**，判定一律依赖输出解析；契约细节见
+> `AGENTS.md` 的「FRU 读取与字段编辑」章节。
+> 点「写入」直接生效（无二次确认），因此按钮以「新值合法且与原值不同」为启用条件；
+> 不做写前自动备份，需要留存原始数据时由用户点「导出备份」自行保存。
+
 ---
 
 ## 五、IPC 通信表
@@ -309,15 +334,15 @@ ipmi-gui-electron/
 | 文件 | 行数 | 说明 |
 |------|------|------|
 | main.js | 298 | 主进程 |
-| renderer.js | 1068 | 渲染进程 (核心) |
-| index.html | 306 | 界面结构 |
-| style.css | 1243 | 样式 |
-| src/modules/*.js (11 个) | 1834 | 业务逻辑模块 |
-| **总计** | **4749** | |
+| renderer.js | 1091 | 渲染进程 (核心) |
+| index.html | 355 | 界面结构 |
+| style.css | 1490 | 样式 |
+| src/modules/*.js (13 个) | 3257 | 业务逻辑模块 |
+| **总计** | **6193** | |
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 17 个 *.test.js | 381 |
+| 19 个 *.test.js | 478 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 
@@ -347,6 +372,15 @@ ipmi-gui-electron/
 - ipmitool 调用用 shell 拼字符串 → 统一 `runIpmiCommand()`（execFile 逐参数传参）
 - 提示框向上弹出被窗口/面板裁切 → 统一向下弹出 + 左右对齐修饰
 - 窄窗口工具栏换行、状态徽标溢出 → 宽度压缩 + 省略号截断
+
+### 新增（v1.3）
+
+- FRU 面板由「只读文本」升级为「结构化字段表 + 字段级编辑」：
+  - `fru.js` 解析 `fru read` 二进制镜像（不用 `fru print` 文本，避免 FRU ID 行省略导致 index 错位）
+  - `fruView.js` 编排「`fru edit` 写入 → 重新读取校验」，点「写入」直接生效（无二次确认、不做写前自动备份）
+  - 新值经 IPC argv 传递；`fru edit` 成功退出码为 1，改为解析输出判定
+  - 可编辑范围：Chassis / Board / Product 的 8-bit ASCII 字段（index 0-9、非空、≤63 字节）
+  - 不提供 Internal Use、整区 `fru write` 覆盖与 `fru upgEkey`（回滚走「原始命令」面板）
 
 ---
 

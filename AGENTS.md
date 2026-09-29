@@ -45,8 +45,10 @@ ipmi-gui-electron/
 │       ├── modal.js         # 模态对话框
 │       ├── templates.js     # 服务器模板 (凭据来自 credentials.js)
 │       ├── scanResultView.js# 扫描结果行渲染 (纯函数)
-│       └── networkScanner.js# 网络扫描
-├── __tests__/               # 单元测试 (16 套件)
+│       ├── networkScanner.js# 网络扫描
+│       ├── fru.js           # FRU 镜像解析/命令构建/结果判定 (纯函数)
+│       └── fruView.js       # FRU 面板渲染与写入编排 (写入->重新读取校验)
+├── __tests__/               # 单元测试 (19 套件)
 └── coverage/                # 覆盖率报告 (已被 .gitignore 忽略)
 ```
 
@@ -158,6 +160,32 @@ BMC 版本号 = `Firmware Revision` + '.' + Aux 字节，取字节规则见 bmcV
 AMI 取 Aux 前 2 字节直接拼接（1.11.1109），openUBMC 取后 2 字节以点分隔（1.11.00.00）。
 ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据不经 shell）。
 
+### FRU 读取与字段编辑 (src/modules/fru.js + fruView.js)
+
+读取：`fru read <id> <file>` 取回二进制镜像，再由 `parseFruImage()` 解析三区字段。
+**不要用 `fru print` 文本解析**——它默认省略 Board/Product FRU ID 行，字段 index 会整体错位。
+
+写入：`fru edit <fruid> field <section> <index> <string>`，契约来自 ipmitool
+`lib/ipmi_fru.c` 源码与真机实测（ipmitool 1.8.18）：
+
+- `<section>` 取参数的**首字符**：`c`=Chassis / `b`=Board / `p`=Product
+- `<index>` 取参数的**首字符**再减 0x30，即只能是 `'0'`~`'9'`；传 `50` 等价于 `5`
+- index = 区内**字符串字段序号**（0 起），起点为 区起始 + 3（Chassis）/+ 6（Board，
+  跳过 Language Code 与 3 字节 Mfg Date）/+ 3（Product），含 FRU ID 与多行 Extra
+- **命令成功时退出码为 1**，禁止用 exit code 判定成败，必须解析输出：成功含
+  `Updating Field : '<旧值>' with '<新值>'` 与 `Done.`；旧值可用于校验"改到的确实是预期字段"
+- 空字符串字段不可编辑（报 `Field not found !`）；新值上限 63 字节且仅可打印 ASCII
+- 新值一律走 IPC 的 argv 参数传递，不拼进命令字符串
+
+写入流程：点「写入」**立即下发**（无二次确认）→ 重新 `fru read` 比对字段值，
+并校验 ipmitool 报告的旧值与预期一致（防止改错字段）。
+由于没有二次确认，**必须**让「写入」按钮以「新值合法且与原值不同」为启用条件
+（见 fruView.validatePreview），不要改成始终可点。
+写入 + 重新读取实测约 3.4 秒，且对话框会遮住摘要行状态，因此进度**必须**显示在
+对话框内部（fruView.setProgress）；期间用 setBusy 冻结对话框，结束后再解除。
+**不做写前自动备份**：需要留存原始数据由用户点「导出备份」（`fru read`）自行保存；
+GUI 不提供整区 `fru write` 入口，回滚需在「原始命令」面板手工执行。
+
 ---
 
 ## 测试
@@ -173,7 +201,9 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - Node 内置模块用 jest.mock() 行内 mock
 - dgram、net、child_process、fs、path、os 均已 mock
 - fullScan 测试设 30s 超时
-- 共 381 用例，17 套件
+- fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）断言 index 映射
+- fruView.test.js 只测纯函数（渲染/planEdit/evaluateEditOutcome），DOM 用注入桩
+- 共 478 用例，19 套件
 
 ---
 
@@ -231,7 +261,7 @@ fullScan 扫整个 /24 网段需 30s 超时。
 | 网络扫描 | scan | scanner.fullScan(), addSingleScanResult() |
 | 电源 | power | executePower(action) |
 | 传感器 | sensor | executeSensor() |
-| FRU | fru | executeCommand('fru list') |
+| FRU | fru | fruView.refresh(), fruView.submitEdit() |
 | 事件日志 | sel | executeCommand('sel list') |
 | 用户 | user | executeCommand('user list') |
 | 网络 | network | executeCommand('lan print') |
@@ -247,3 +277,7 @@ fullScan 扫整个 /24 网段需 30s 超时。
 4. **新增凭据**：src/config/ipmi-credentials.json 加模板
 5. **新增收藏分类**：src/modules/favorites.js 的 `FAVORITE_CATEGORIES`（编辑下拉与筛选下拉会自动同步；收藏项 category 为空视为"通用"）
 6. **CSS 主题**：style.css :root 下已有 60+ 变量，遵循现有命名
+7. **新增 FRU 可编辑区/字段**：只改 src/modules/fru.js 的 `FRU_SECTIONS`
+   （shortKey / fieldOffset / 字段标签单一来源），并同步 __tests__/fru.test.js
+8. **新增 FRU 相关命令**：新值走 `executeCommand(command, outputId, server, args)` 的
+   argv 参数，不要拼进命令字符串
