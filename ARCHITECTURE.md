@@ -249,6 +249,15 @@ ipmi-gui-electron/
     ├── 1) fru edit <id> field <c|b|p> <index>    点「写入」立即下发，新值走 argv
     └── 2) 重新 fru read → verifyFieldValue() 比对字段值
              └── 同时校验 ipmitool 报告的旧值与预期一致（防止改错字段）
+
+[刷写整区] → fruView.flashFru() → selectFile → validateFlashImage → diffImages → 确认框
+    │     └── 大小不等 / 非合法 FRU / 校验和错 → 直接拒绝，不下发
+    └── fruView.confirmFlash()
+         ├── 1) fru read  → 写前自动备份（独立文件名，避免被回读覆盖）
+         ├── 2) fru write <id> <file> → parseWriteResult
+         │        └── 退出码恒为 0，只看 Size to Write 是否等于 Fru Size
+         └── 3) fru read → compareImages 逐字节比对
+                  └── 唯一可靠的成败判据（字段级比对会漏掉 padding / 校验和）
 ```
 
 > `fru edit` **成功时退出码为 1**，判定一律依赖输出解析；契约细节见

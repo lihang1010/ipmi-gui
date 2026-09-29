@@ -368,6 +368,7 @@ function bindEvents() {
     getServer: getCurrentServer,
     invoke: (command, args) => ipcRenderer.invoke('ipmi:execute', getCurrentServer(), command, args || []),
     selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
+    selectFile: (filters) => ipcRenderer.invoke('dialog:selectFile', filters),
     alert: safeAlert
   });
 

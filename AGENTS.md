@@ -205,8 +205,29 @@ Extra 按出现顺序累加，因此空字段缺失不影响其它字段的序�
 
 **对话框的关闭时机**：未提交时只有「×」和「取消」两个入口；**写入成功后自动关闭**。
 刻意不绑定遮罩点击 —— 否则手滑点到对话框外面就会丢掉已输入的内容。
-**不做写前自动备份**：需要留存原始数据由用户点「导出备份」（`fru read`）自行保存；
-GUI 不提供整区 `fru write` 入口，回滚需在「原始命令」面板手工执行。
+字段级写入**不做**写前自动备份：需要留存原始数据由用户点「导出备份」（`fru read`）自行保存；
+整区刷写见下节（那条路径强制写前备份）。
+
+### FRU 整区刷写 (fru write)
+
+`fru write <id> <file>` 和 `fru edit` 有本质差别：**ipmitool 完全不校验文件内容**
+（`lib/ipmi_fru.c:3468-3529` 直接把文件字节写进 EEPROM），而且函数返回 void，
+**退出码恒为 0** —— 实测连「文件不存在」都是 0，错误只落在 stderr。因此：
+
+- 判定成败只能解析 stdout 的 `Fru Size` / `Size to Write`，且
+  **`Size to Write` 必须等于 `Fru Size` 且大于 0**。等于 0 说明文件为空（ipmitool 静默
+  什么都不写），小于 `Fru Size` 说明只覆盖了前一段（FRU 会被写坏）。
+  `parseWriteResult` 已覆盖这几种情况
+- 下发前必须自己校验（`fru.validateFlashImage`）：**文件大小 == 设备 FRU 大小**、
+  能解析成合法 FRU、公共头与三个信息区的校验和都正确。缺任何一项都可能写坏设备
+- **唯一可靠的确认是写后回读逐字节比对**（`fru.compareImages`）。字段级比对会漏掉
+  padding、区长度与校验和的变化，不能用来判断刷写是否成功
+- 写前自动备份到 `%TEMP%/ipmi-gui-fru/fru-<host>-id<id>-before-flash.bin`。**必须与日常
+  读取用的临时镜像区分命名**（见 `tempFlashBackupPath`），否则紧接着的回读会把备份
+  覆盖掉，失去回滚能力
+- 确认框 `fru-flash-dialog` 里用 `fruView.renderFlashDiff` 列出字段级 diff
+  （`fru.diffImages`，超过 `FLASH_DIFF_LIMIT` 条折叠）。**只有校验通过才关闭**，
+  失败保持打开便于重试或取消；同样不绑遮罩点击关闭
 
 ---
 

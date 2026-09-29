@@ -10,7 +10,9 @@
  * 不做写前自动备份，也没有二次确认 —— 因此「写入」按钮以
  * 「新值合法且与原值不同」为启用条件（见 validatePreview）。
  *
- * 注意：ipmitool 的 `fru edit` 成功时退出码为 1，判定一律依赖输出解析。
+ * 注意：ipmitool 的 `fru edit` 与 `fru write` **都不能用退出码判定成败**
+ * （fru edit 等长写入成功时是 0、变长时是 1；fru write 恒为 0），一律依赖输出解析；
+ * 整区刷写则以「回读逐字节比对」为唯一成功判据。
  */
 
 const fs = require('fs');
@@ -22,6 +24,9 @@ const { escapeHtml } = require('./utils');
 
 /** 临时镜像目录名（放在系统临时目录下，避免污染用户目录） */
 const TEMP_DIR_NAME = 'ipmi-gui-fru';
+
+/** 刷写确认框里最多列出的字段差异条数 */
+const FLASH_DIFF_LIMIT = 12;
 
 // =====================================================================
 // 纯函数：渲染
@@ -308,7 +313,8 @@ function evaluateEditOutcome(params) {
 let deps = {
   getServer: () => null,
   invoke: () => Promise.resolve({ code: -1, stdout: '', stderr: 'IPC 未初始化' }),
-  selectDirectory: () => Promise.resolve(null)
+  selectDirectory: () => Promise.resolve(null),
+  selectFile: () => Promise.resolve(null)
 };
 
 let fruList = [];
@@ -317,6 +323,8 @@ let currentFruId = null;
 let currentImage = null;
 /** `fru print -v` 快速预览结果（仅展示，序号未校准） */
 let previewImage = null;
+/** 待确认的刷写任务（{filePath, buffer, image, diff}），关闭确认框即清空 */
+let pendingFlash = null;
 let busy = false;
 
 /**
@@ -342,6 +350,7 @@ function setBusy(value, label) {
   const saveBtn = document.getElementById('fru-dialog-save');
   const refreshBtn = document.getElementById('btn-fru-refresh');
   const backupBtn = document.getElementById('btn-fru-backup');
+  const flashBtn = document.getElementById('btn-fru-flash');
 
   if (saveBtn) {
     saveBtn.disabled = value;
@@ -350,6 +359,7 @@ function setBusy(value, label) {
   }
   if (refreshBtn) refreshBtn.disabled = value;
   if (backupBtn) backupBtn.disabled = value;
+  if (flashBtn) flashBtn.disabled = value;
 
   // 写入期间冻结对话框其余交互，避免中途关闭导致状态错乱
   ['fru-dialog-close', 'fru-dialog-cancel', 'fru-dialog-value'].forEach(id => {
@@ -384,6 +394,22 @@ function tempImagePath(server, fruId) {
   }
   const host = String((server && server.host) || 'unknown').replace(/[^\w.-]/g, '_');
   return path.join(dir, 'fru-' + host + '-id' + fruId + '.bin');
+}
+
+/**
+ * 刷写前的自动备份路径
+ *
+ * 与日常读取用的临时镜像刻意分开，否则随后的回读会把备份覆盖掉、失去回滚能力。
+ */
+function tempFlashBackupPath(server, fruId) {
+  const dir = path.join(os.tmpdir(), TEMP_DIR_NAME);
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (e) {
+    // 目录已存在或创建失败，交给后续读写报错
+  }
+  const host = String((server && server.host) || 'unknown').replace(/[^\w.-]/g, '_');
+  return path.join(dir, 'fru-' + host + '-id' + fruId + '-before-flash.bin');
 }
 
 function readBinary(filePath) {
@@ -839,9 +865,249 @@ function initFruPanel(dependencies) {
     });
   }
 
-  // 刻意不绑定遮罩点击关闭：编辑框只在点「×」或「取消」时关闭，
+  const flashBtn = document.getElementById('btn-fru-flash');
+  const flashCloseBtn = document.getElementById('fru-flash-close');
+  const flashCancelBtn = document.getElementById('fru-flash-cancel');
+  const flashConfirmBtn = document.getElementById('fru-flash-confirm');
+
+  if (flashBtn) flashBtn.addEventListener('click', flashFru);
+  if (flashCloseBtn) flashCloseBtn.addEventListener('click', closeFlashDialog);
+  if (flashCancelBtn) flashCancelBtn.addEventListener('click', closeFlashDialog);
+  if (flashConfirmBtn) flashConfirmBtn.addEventListener('click', confirmFlash);
+
+  // 刻意不绑定遮罩点击关闭：编辑框和刷写框都只在点「×」或「取消」时关闭，
   // 避免手滑点到遮罩就丢掉已输入的内容。
   renderSelect();
+}
+
+// =====================================================================
+// 刷写：整区覆盖（fru write）
+// =====================================================================
+
+/**
+ * 选择本地 bin 文件并弹出刷写确认框
+ *
+ * ipmitool 的 `fru write` 不做任何内容校验、退出码还恒为 0，所以「文件大小必须等于
+ * 设备 FRU 大小」「必须是合法且校验和正确的 FRU 镜像」这些硬性检查必须在打开确认框
+ * 之前做完 —— 否则一次误选就会把 FRU 写坏。
+ */
+async function flashFru() {
+  if (busy) return;
+
+  const server = deps.getServer();
+  if (!server) {
+    await deps.alert('请先选择服务器');
+    return;
+  }
+  if (!currentFruId) {
+    await deps.alert('请先刷新 FRU 列表');
+    return;
+  }
+  if (!currentImage || !currentImage.valid) {
+    await deps.alert(previewImage ? '字段序号正在校准，请稍候再试' : '尚未读取 FRU 数据，请先刷新');
+    return;
+  }
+
+  const filePath = await deps.selectFile([
+    { name: 'FRU 镜像', extensions: ['bin'] },
+    { name: '所有文件', extensions: ['*'] }
+  ]);
+  if (!filePath) return;
+
+  let buffer;
+  try {
+    buffer = fs.readFileSync(filePath);
+  } catch (err) {
+    await deps.alert('无法读取该文件：' + err.message);
+    return;
+  }
+
+  const checked = fru.validateFlashImage(buffer, currentImage.size);
+  if (!checked.ok) {
+    await deps.alert('无法刷写该文件：\n\n' + checked.error);
+    return;
+  }
+
+  pendingFlash = {
+    filePath,
+    buffer,
+    image: checked.image,
+    diff: fru.diffImages(currentImage, checked.image)
+  };
+
+  renderFlashDialog();
+  setFlashProgress(null);
+
+  const dialog = document.getElementById('fru-flash-dialog');
+  if (dialog) dialog.style.display = 'flex';
+}
+
+/** 填充刷写确认框 */
+function renderFlashDialog() {
+  if (!pendingFlash) return;
+
+  const fileEl = document.getElementById('fru-flash-file');
+  if (fileEl) fileEl.textContent = pendingFlash.filePath;
+
+  const metaEl = document.getElementById('fru-flash-meta');
+  if (metaEl) {
+    metaEl.textContent = pendingFlash.buffer.length + ' 字节 · 校验和正常 · 目标 FRU ID ' +
+      currentFruId + (currentDescription() ? '（' + currentDescription() + '）' : '');
+  }
+
+  const countEl = document.getElementById('fru-flash-diff-count');
+  if (countEl) {
+    countEl.textContent = pendingFlash.diff.count
+      ? pendingFlash.diff.count + ' 处字段变化'
+      : '字段值无变化';
+  }
+
+  const diffEl = document.getElementById('fru-flash-diff');
+  if (diffEl) diffEl.innerHTML = renderFlashDiff(pendingFlash.diff);
+}
+
+/**
+ * 渲染字段差异列表（纯函数）
+ *
+ * @param {{count:number, changes:Array<object>}} diff fru.diffImages 的产物
+ * @param {number} [limit] 最多列出的条数，默认 FLASH_DIFF_LIMIT
+ * @returns {string} HTML
+ */
+function renderFlashDiff(diff, limit) {
+  const max = limit || FLASH_DIFF_LIMIT;
+  const changes = (diff && diff.changes) || [];
+
+  if (!changes.length) {
+    return '<div class="fru-flash-diff-empty">字段值完全一致。刷写仍会按文件内容覆盖 ' +
+      'padding、区长度与校验和等非字段字节。</div>';
+  }
+
+  const rows = changes.slice(0, max).map(item => '' +
+    '<div class="fru-flash-diff-row">' +
+      '<span class="fru-flash-diff-label" title="' +
+        escapeHtml(item.sectionLabel + ' / ' + item.label) + '">' +
+        escapeHtml(item.sectionLabel) + ' / ' + escapeHtml(item.label) +
+        (item.index === null ? '' : ' #' + item.index) + '</span>' +
+      '<span class="fru-flash-diff-from">' + escapeHtml(item.from || '(空)') + '</span>' +
+      '<span class="fru-flash-diff-arrow">→</span>' +
+      '<span class="fru-flash-diff-to">' + escapeHtml(item.to || '(空)') + '</span>' +
+    '</div>').join('');
+
+  const more = changes.length > max
+    ? '<div class="fru-flash-diff-more">另有 ' + (changes.length - max) + ' 处变化未列出</div>'
+    : '';
+
+  return rows + more;
+}
+
+function closeFlashDialog() {
+  const dialog = document.getElementById('fru-flash-dialog');
+  if (dialog) dialog.style.display = 'none';
+  pendingFlash = null;
+  setFlashProgress(null);
+}
+
+/** 刷写框专用的按钮冻结（与编辑框那套互不影响，共用同一个 busy 标志） */
+function setFlashBusy(value, label) {
+  busy = value;
+
+  ['fru-flash-confirm', 'fru-flash-cancel', 'fru-flash-close',
+    'btn-fru-refresh', 'btn-fru-backup', 'btn-fru-flash'].forEach(id => {
+    const node = document.getElementById(id);
+    if (node) node.disabled = value;
+  });
+
+  const confirmBtn = document.getElementById('fru-flash-confirm');
+  if (confirmBtn) confirmBtn.classList.toggle('loading', value);
+
+  if (value && label) setFlashProgress(label);
+}
+
+function setFlashProgress(text) {
+  const box = document.getElementById('fru-flash-progress');
+  const label = document.getElementById('fru-flash-progress-text');
+  if (label) label.textContent = text || '';
+  if (box) box.style.display = text ? 'flex' : 'none';
+}
+
+/**
+ * 确认刷写：写前备份 → fru write → 逐字节回读校验
+ *
+ * ipmitool 的退出码不可用（恒为 0），**回读逐字节比对才是唯一的成功判据**，
+ * 字段级比对会漏掉 padding、区长度与校验和的变化。
+ */
+async function confirmFlash() {
+  if (busy || !pendingFlash) return;
+
+  const server = deps.getServer();
+  if (!server) {
+    await deps.alert('请先选择服务器');
+    return;
+  }
+
+  const plan = pendingFlash;
+  const backupPath = tempFlashBackupPath(server, currentFruId);
+
+  setFlashBusy(true, '正在备份当前镜像…');
+  try {
+    // ---------- 1) 写前自动备份（失败必须中止）----------
+    const backup = await readFruImage(server, currentFruId, backupPath);
+    if (!backup.ok) {
+      setResult('error', '写前备份失败，已中止刷写: ' + backup.error, backup.detail);
+      setFlashProgress('备份失败，已中止刷写');
+      await deps.alert('写前备份失败，已中止刷写：\n\n' + backup.error);
+      return;
+    }
+
+    // ---------- 2) fru write ----------
+    setFlashProgress('正在刷写设备…');
+    const writeResult = await deps.invoke('fru write', [String(currentFruId), plan.filePath]);
+    const parsed = fru.parseWriteResult(writeResult);
+
+    if (!parsed.ok) {
+      setResult('error', '刷写失败: ' + parsed.error, formatResult(writeResult));
+      setFlashProgress('刷写失败：' + parsed.error);
+      await deps.alert('刷写失败：\n\n' + parsed.error + '\n\n写前备份在：\n' + backupPath);
+      return;
+    }
+
+    // ---------- 3) 回读并逐字节校验 ----------
+    setFlashProgress('刷写已下发，正在逐字节回读校验…');
+    const readbackPath = tempImagePath(server, currentFruId);
+    const readback = await readFruImage(server, currentFruId, readbackPath);
+    const readbackBuffer = readback.ok ? readBinary(readbackPath) : null;
+
+    if (!readback.ok || !readbackBuffer) {
+      setResult('warning', '刷写已下发，但回读失败，无法确认结果',
+        readback.detail || readbackPath);
+      setFlashProgress('刷写已下发，但回读失败');
+      await deps.alert('刷写命令已执行，但回读失败，无法确认设备状态。\n\n写前备份在：\n' + backupPath);
+      return;
+    }
+
+    const compared = fru.compareImages(plan.buffer, readbackBuffer);
+    if (!compared.ok) {
+      const where = compared.lengthMismatch
+        ? '长度不一致'
+        : '首个不同位置 0x' + compared.firstDiffOffset.toString(16).toUpperCase();
+      setResult('error', '刷写后校验不一致: ' + compared.diffCount + ' 字节不同（' + where + '）');
+      setFlashProgress('校验不一致，共 ' + compared.diffCount + ' 字节不同');
+      await deps.alert('刷写后逐字节校验不一致：共 ' + compared.diffCount + ' 字节不同（' + where +
+        '）。\n\n写前备份在：\n' + backupPath + '\n可在「原始命令」面板执行 fru write 回滚。');
+      return;
+    }
+
+    // ---------- 成功 ----------
+    currentImage = readback.image;
+    renderCurrent();
+    setResult('ok', '刷写成功，设备镜像与文件逐字节一致（写前备份：' + backupPath + '）');
+    closeFlashDialog();
+  } catch (err) {
+    setResult('error', '刷写异常: ' + err.message);
+    await deps.alert('刷写异常：' + err.message);
+  } finally {
+    setFlashBusy(false);
+  }
 }
 
 /**
@@ -864,6 +1130,10 @@ module.exports = {
   refresh,
   load,
   exportBackup,
+  flashFru,
+  renderFlashDiff,
+  closeFlashDialog,
+  confirmFlash,
   openEdit,
   closeEdit,
   validatePreview,

@@ -393,8 +393,17 @@ describe('fruView 写入交互反馈', () => {
   ].join('\n');
 
   const progressLog = [];
+  const flashDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fru-flash-'));
   let elements = {};
   let releaseEdit = null;
+  let invoke = null;
+  let alerts = [];
+  /** 模拟设备当前镜像；一旦被"刷写"过就固定为那份内容 */
+  let deviceOverride = null;
+  /** 模拟用户在文件选择框里选中的文件内容；保持 null 表示取消选择 */
+  let flashFileBuffer = null;
+  /** 置 true 时模拟"写入成功但回读内容不符"的故障设备 */
+  let writeCorrupt = false;
 
   function makeEl(id) {
     const base = {
@@ -439,6 +448,10 @@ describe('fruView 写入交互反馈', () => {
     progressLog.length = 0;
     releaseEdit = null;
     deviceValue = 'N/A';
+    deviceOverride = null;
+    flashFileBuffer = null;
+    writeCorrupt = false;
+    alerts = [];
 
     global.document = {
       getElementById: el,
@@ -446,7 +459,7 @@ describe('fruView 写入交互反馈', () => {
       addEventListener: () => {}
     };
 
-    const invoke = jest.fn((command, args) => {
+    invoke = jest.fn((command, args) => {
       if (command === 'fru list') {
         return Promise.resolve({
           code: 0,
@@ -460,8 +473,19 @@ describe('fruView 写入交互反馈', () => {
       if (command === 'fru read') {
         const target = args[1];
         fs.mkdirSync(path.dirname(target), { recursive: true });
-        fs.writeFileSync(target, readBuffer());
+        fs.writeFileSync(target, deviceOverride || readBuffer());
         return Promise.resolve({ code: 0, stdout: 'Fru Size         : 2048 bytes\nDone\n', stderr: '' });
+      }
+      if (command === 'fru write') {
+        // 模拟真实设备：正常情况下写入后设备内容等于文件内容；writeCorrupt 时故意不符
+        deviceOverride = Buffer.from(flashFileBuffer);
+        if (writeCorrupt) deviceOverride[123] = (deviceOverride[123] + 1) & 0xff;
+        return Promise.resolve({
+          code: 0,
+          stdout: 'Fru Size         : 2048 bytes\n' +
+            'Size to Write    : ' + flashFileBuffer.length + ' bytes\n',
+          stderr: ''
+        });
       }
       // fru edit：挂起，便于断言写入期间的界面状态（releaseEdit 可传入自定义结果）
       return new Promise(resolve => {
@@ -473,7 +497,13 @@ describe('fruView 写入交互反馈', () => {
       getServer: () => ({ host: '192.168.60.44' }),
       invoke,
       selectDirectory: async () => os.tmpdir(),
-      alert: async () => {}
+      selectFile: async () => {
+        if (!flashFileBuffer) return null;
+        const target = path.join(flashDir, 'selected.bin');
+        fs.writeFileSync(target, flashFileBuffer);
+        return target;
+      },
+      alert: async (msg) => { alerts.push(msg); }
     });
 
     await fruView.refresh();
@@ -548,6 +578,78 @@ describe('fruView 写入交互反馈', () => {
     await fruView.openEdit('p', 7);
     el('fru-dialog-cancel').listeners.click();
     expect(el('fru-dialog').style.display).toBe('none');
+  });
+
+  test('刷写：文件大小与设备不一致时应拒绝，且不下发写入', async () => {
+    // 设备是 2048 字节，文件只有一半 —— fru write 会只覆盖前半段，把 FRU 写坏
+    flashFileBuffer = imageBuffer.subarray(0, 1024);
+
+    await fruView.flashFru();
+
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]).toContain('文件大小 1024');
+    expect(alerts[0]).toContain('写坏');
+    expect(el('fru-flash-dialog').style.display).not.toBe('flex');
+    expect(invoke.mock.calls.some(call => call[0] === 'fru write')).toBe(false);
+  });
+
+  test('刷写：校验和损坏的镜像应被拒绝', async () => {
+    const broken = Buffer.from(imageBuffer);
+    broken[7] = (broken[7] + 1) & 0xff;
+
+    flashFileBuffer = broken;
+    await fruView.flashFru();
+
+    expect(alerts[0]).toContain('公共头校验和');
+    expect(invoke.mock.calls.some(call => call[0] === 'fru write')).toBe(false);
+  });
+
+  test('刷写：用户取消文件选择时静默返回', async () => {
+    flashFileBuffer = null;
+
+    await fruView.flashFru();
+
+    expect(alerts.length).toBe(0);
+    expect(el('fru-flash-dialog').style.display).not.toBe('flex');
+  });
+
+  test('刷写：合法文件应打开确认框，确认后逐字节校验通过并关闭', async () => {
+    flashFileBuffer = Buffer.from(imageBuffer);
+
+    await fruView.flashFru();
+
+    expect(el('fru-flash-dialog').style.display).toBe('flex');
+    expect(el('fru-flash-meta').textContent).toContain('2048 字节');
+    expect(el('fru-flash-meta').textContent).toContain('校验和正常');
+    expect(el('fru-flash-diff-count').textContent).toBe('字段值无变化');
+    expect(el('fru-flash-diff').innerHTML).toContain('字段值完全一致');
+
+    await fruView.confirmFlash();
+
+    // 写前备份与日常读取的临时镜像必须分开，否则回读会覆盖备份、失去回滚能力
+    const readPaths = invoke.mock.calls
+      .filter(call => call[0] === 'fru read')
+      .map(call => call[1][1]);
+    expect(readPaths.some(p => p.includes('-before-flash.bin'))).toBe(true);
+    expect(invoke.mock.calls.some(call => call[0] === 'fru write')).toBe(true);
+
+    expect(el('fru-result').className).toContain('ok');
+    expect(el('fru-result').textContent).toContain('逐字节一致');
+    expect(el('fru-flash-dialog').style.display).toBe('none');
+  });
+
+  test('刷写：回读与文件不一致时必须判失败，不能报成功', async () => {
+    flashFileBuffer = Buffer.from(imageBuffer);
+    await fruView.flashFru();
+
+    writeCorrupt = true;
+    await fruView.confirmFlash();
+
+    expect(el('fru-result').className).toContain('error');
+    expect(el('fru-result').textContent).toContain('校验不一致');
+    expect(alerts.some(msg => msg.includes('逐字节校验不一致'))).toBe(true);
+    // 校验不通过时不关闭确认框，便于用户重试或取消
+    expect(el('fru-flash-dialog').style.display).toBe('flex');
   });
 
   test('二进制校准完成前应先渲染预览并锁定编辑', async () => {

@@ -603,6 +603,210 @@ function buildBackupFileName(params) {
 }
 
 /**
+ * 校验「待刷写镜像」是否可以安全下发给设备
+ *
+ * ipmitool 的 `fru write` **不做任何内容校验**（ipmi_fru.c:3468-3529 直接把文件字节
+ * 写进 EEPROM，函数返回 void），以下几项必须由调用方保证，否则会把 FRU 写坏：
+ *
+ * 1. 文件大小必须等于设备 FRU 大小 —— 小了只会覆盖前 N 字节，后半段残留旧数据
+ * 2. 镜像必须能解析成合法 FRU（头部版本 / 区偏移自洽）
+ * 3. 公共头与三个信息区的零校验和必须都通过
+ *
+ * @param {Buffer|Uint8Array} buffer 用户选择的文件内容
+ * @param {number} deviceSize 设备当前 FRU 大小（即 fru read 得到的字节数）
+ * @returns {{ok:boolean, error?:string, image?:object}}
+ */
+function validateFlashImage(buffer, deviceSize) {
+  if (!buffer || !buffer.length) {
+    return { ok: false, error: '文件为空' };
+  }
+
+  const size = Number(deviceSize);
+  if (!Number.isFinite(size) || size <= 0) {
+    return { ok: false, error: '未知的设备 FRU 大小，请先刷新读取' };
+  }
+
+  if (buffer.length !== size) {
+    return {
+      ok: false,
+      error: '文件大小 ' + buffer.length + ' 字节与设备 FRU 大小 ' + size + ' 字节不一致：' +
+        (buffer.length < size
+          ? '文件偏小，fru write 只会覆盖前 ' + buffer.length + ' 字节，后半段保留旧数据，FRU 会被写坏'
+          : '超出部分会被设备截断')
+    };
+  }
+
+  const image = parseFruImage(buffer);
+  if (!image.valid) {
+    return { ok: false, error: '不是合法的 FRU 镜像：' + image.error, image };
+  }
+
+  if (!image.header || !image.header.checksumValid) {
+    return { ok: false, error: '公共头校验和不正确，设备可能无法识别该镜像', image };
+  }
+
+  const broken = image.sections.filter(section => !section.checksumValid);
+  if (broken.length) {
+    return {
+      ok: false,
+      error: '以下信息区校验和不正确：' + broken.map(section => section.label).join('、') +
+        '，设备可能无法识别',
+      image
+    };
+  }
+
+  return { ok: true, image };
+}
+
+/**
+ * 字段级 diff：列出「设备当前值」到「待写入值」会发生的变化
+ *
+ * @param {object} current parseFruImage(设备当前镜像)
+ * @param {object} incoming parseFruImage(待写入镜像)
+ * @returns {{count:number, changes:Array<{sectionKey:string, sectionLabel:string, index:number|null, label:string, from:string, to:string}>}}
+ */
+function diffImages(current, incoming) {
+  const changes = [];
+  if (!current || !current.valid || !incoming || !incoming.valid) {
+    return { count: 0, changes };
+  }
+
+  const labelOf = key => {
+    const section = FRU_SECTIONS.find(item => item.key === key);
+    return section ? section.label : key;
+  };
+
+  const incomingByKey = new Map(incoming.sections.map(section => [section.key, section]));
+
+  current.sections.forEach(section => {
+    const sectionLabel = labelOf(section.key);
+    const target = incomingByKey.get(section.key);
+
+    if (!target) {
+      changes.push({
+        sectionKey: section.key,
+        sectionLabel,
+        index: null,
+        label: sectionLabel + ' 区整体',
+        from: section.fields.length + ' 个字段',
+        to: '该区不存在'
+      });
+      return;
+    }
+
+    const max = Math.max(section.fields.length, target.fields.length);
+    for (let i = 0; i < max; i++) {
+      const before = section.fields[i];
+      const after = target.fields[i];
+      if (before && after && before.value === after.value) continue;
+
+      const sample = after || before;
+      changes.push({
+        sectionKey: section.key,
+        sectionLabel,
+        index: sample.index,
+        label: sample.label,
+        from: before ? before.value : '（该字段不存在）',
+        to: after ? after.value : '（该字段被移除）'
+      });
+    }
+  });
+
+  incoming.sections.forEach(section => {
+    if (current.sections.some(item => item.key === section.key)) return;
+    const sectionLabel = labelOf(section.key);
+    changes.push({
+      sectionKey: section.key,
+      sectionLabel,
+      index: null,
+      label: sectionLabel + ' 区整体',
+      from: '该区不存在',
+      to: section.fields.length + ' 个字段'
+    });
+  });
+
+  return { count: changes.length, changes };
+}
+
+/**
+ * 解析 `fru write` 的输出
+ *
+ * **退出码恒为 0**（ipmi_fru_write_from_bin 返回 void，文件打不开也只是写条日志），
+ * 只能靠输出判定：
+ *   - 文件打不开 → stderr `Error opening file <path>`
+ *   - 空文件     → `Size to Write : 0 bytes`，ipmitool 静默不写任何数据
+ *   - 文件偏小   → `Size to Write` < `Fru Size`，只覆盖前一段
+ *
+ * @param {{code?:number, stdout?:string, stderr?:string}} result
+ * @returns {{ok:boolean, error?:string, fruSize?:number, writtenSize?:number}}
+ */
+function parseWriteResult(result) {
+  const stdout = (result && result.stdout) || '';
+  const stderr = (result && result.stderr) || '';
+  const raw = (stdout + '\n' + stderr).trim();
+
+  if (/Error opening file/i.test(raw)) {
+    return { ok: false, error: 'ipmitool 无法打开该文件' };
+  }
+  if (/Timeout accessing FRU info/i.test(raw)) {
+    return { ok: false, error: '读取 FRU 信息超时，设备未响应' };
+  }
+  if (/Cannot allocate/i.test(raw)) {
+    return { ok: false, error: 'ipmitool 内存不足，无法按 FRU 大小分配缓冲区' };
+  }
+
+  const fruMatch = stdout.match(/Fru Size\s*:\s*(\d+)/);
+  const writtenMatch = stdout.match(/Size to Write\s*:\s*(\d+)/);
+  if (!fruMatch || !writtenMatch) {
+    return { ok: false, error: raw ? '未识别的输出：' + raw : 'ipmitool 无任何输出' };
+  }
+
+  const fruSize = Number(fruMatch[1]);
+  const writtenSize = Number(writtenMatch[1]);
+
+  if (writtenSize === 0) {
+    return { ok: false, error: '文件为空，ipmitool 未写入任何数据', fruSize, writtenSize };
+  }
+  if (writtenSize !== fruSize) {
+    return {
+      ok: false,
+      error: '只写入了 ' + writtenSize + ' / ' + fruSize + ' 字节，FRU 可能已被部分覆盖',
+      fruSize,
+      writtenSize
+    };
+  }
+
+  return { ok: true, fruSize, writtenSize };
+}
+
+/**
+ * 逐字节比对
+ *
+ * 整区刷写必须逐字节确认：字段级比对看不出 padding、区长度、校验和与多记录区的变化。
+ *
+ * @param {Buffer|Uint8Array} expected 期望写入的内容
+ * @param {Buffer|Uint8Array} actual 写入后回读的内容
+ * @returns {{ok:boolean, diffCount:number, firstDiffOffset:number, lengthMismatch:boolean}}
+ */
+function compareImages(expected, actual) {
+  const a = expected || [];
+  const b = actual || [];
+  const lengthMismatch = a.length !== b.length;
+  const limit = Math.max(a.length, b.length);
+
+  let diffCount = 0;
+  let firstDiffOffset = -1;
+  for (let i = 0; i < limit; i++) {
+    if (a[i] !== b[i]) {
+      if (firstDiffOffset < 0) firstDiffOffset = i;
+      diffCount++;
+    }
+  }
+
+  return { ok: !lengthMismatch && diffCount === 0, diffCount, firstDiffOffset, lengthMismatch };
+}
+
+/**
  * 汇总镜像中的全部可编辑字段（用于 UI 渲染前的过滤）
  * @param {object} image
  * @returns {Array<object>}
@@ -649,5 +853,9 @@ module.exports = {
   parseEditResult,
   verifyFieldValue,
   buildBackupFileName,
+  validateFlashImage,
+  diffImages,
+  parseWriteResult,
+  compareImages,
   listEditableFields
 };

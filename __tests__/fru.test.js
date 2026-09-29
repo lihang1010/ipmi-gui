@@ -594,3 +594,173 @@ describe('fru.parseFruPrint', () => {
     expect(fru.parseFruPrint('hello world').valid).toBe(false);
   });
 });
+
+/**
+ * 整区刷写的保护层
+ *
+ * ipmitool 的 fru write 不做任何内容校验、且退出码恒为 0，
+ * 这三组检查是唯一的安全网。
+ */
+describe('fru.validateFlashImage', () => {
+  test('should accept a valid image matching the device size', () => {
+    expect(fru.validateFlashImage(makeImage(), 2048).ok).toBe(true);
+  });
+
+  test('should reject a size mismatch because it would partially overwrite', () => {
+    const result = fru.validateFlashImage(makeImage().subarray(0, 1024), 2048);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('文件大小 1024');
+    expect(result.error).toContain('写坏');
+  });
+
+  test('should reject an oversized file', () => {
+    const oversized = Buffer.concat([makeImage(), Buffer.alloc(64)]);
+    const result = fru.validateFlashImage(oversized, 2048);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('截断');
+  });
+
+  test('should reject an empty file or unknown device size', () => {
+    expect(fru.validateFlashImage(Buffer.alloc(0), 2048).error).toContain('文件为空');
+    expect(fru.validateFlashImage(null, 2048).ok).toBe(false);
+    expect(fru.validateFlashImage(makeImage(), 0).error).toContain('未知的设备 FRU 大小');
+  });
+
+  test('should reject a broken common-header checksum', () => {
+    const broken = Buffer.from(makeImage());
+    broken[7] = (broken[7] + 1) & 0xff;
+    const result = fru.validateFlashImage(broken, 2048);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('公共头校验和');
+  });
+
+  test('should reject a broken section checksum', () => {
+    // 夹具里 Chassis 区 @8 长 32，其校验和字节位于 8 + 32 - 1 = 39
+    const broken = Buffer.from(makeImage());
+    broken[39] = (broken[39] + 1) & 0xff;
+    const result = fru.validateFlashImage(broken, 2048);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('Chassis');
+  });
+
+  test('should reject right-sized but non-FRU content', () => {
+    expect(fru.validateFlashImage(Buffer.alloc(2048, 0x5a), 2048).ok).toBe(false);
+  });
+});
+
+describe('fru.parseWriteResult', () => {
+  test('should accept the real successful output', () => {
+    const result = fru.parseWriteResult({
+      code: 0,
+      stdout: 'Fru Size         : 2048 bytes\nSize to Write    : 2048 bytes\n',
+      stderr: ''
+    });
+    expect(result).toMatchObject({ ok: true, fruSize: 2048, writtenSize: 2048 });
+  });
+
+  test('should fail on a missing file even though the exit code is 0', () => {
+    // 真机实测：文件不存在时 ipmitool 依然 exit 0，错误只在 stderr
+    const result = fru.parseWriteResult({
+      code: 0,
+      stdout: '',
+      stderr: 'Error opening file C:\\Temp\\nope.bin'
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('无法打开');
+  });
+
+  test('should fail on an empty file (ipmitool silently writes nothing)', () => {
+    const result = fru.parseWriteResult({
+      stdout: 'Fru Size         : 2048 bytes\nSize to Write    : 0 bytes\n'
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('未写入任何数据');
+  });
+
+  test('should fail on a partial write', () => {
+    const result = fru.parseWriteResult({
+      stdout: 'Fru Size         : 2048 bytes\nSize to Write    : 512 bytes\n'
+    });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('部分覆盖');
+  });
+
+  test('should report timeout and allocation failures', () => {
+    expect(fru.parseWriteResult({ stdout: '  Timeout accessing FRU info. (Device not present?)' }).error)
+      .toContain('超时');
+    expect(fru.parseWriteResult({ stdout: 'Cannot allocate 2048 bytes' }).error)
+      .toContain('内存不足');
+  });
+
+  test('should flag unrecognised or empty output', () => {
+    expect(fru.parseWriteResult({ stdout: 'hello' }).error).toContain('未识别的输出');
+    expect(fru.parseWriteResult({}).error).toContain('无任何输出');
+    expect(fru.parseWriteResult(null).ok).toBe(false);
+  });
+});
+
+describe('fru.diffImages', () => {
+  test('should report no change for identical images', () => {
+    const image = fru.parseFruImage(makeImage());
+    expect(fru.diffImages(image, image).count).toBe(0);
+  });
+
+  test('should list a changed field with section, index and both values', () => {
+    const current = fru.parseFruImage(makeImage());
+    const incoming = fru.parseFruImage(makeImage());
+    sectionOf(incoming, 'product').fields[7].value = 'XYZ';
+
+    const diff = fru.diffImages(current, incoming);
+    expect(diff.count).toBe(1);
+    expect(diff.changes[0]).toMatchObject({
+      sectionKey: 'product',
+      sectionLabel: 'Product',
+      index: 7,
+      label: 'Product Extra',
+      from: 'N/A',
+      to: 'XYZ'
+    });
+  });
+
+  test('should flag a removed field and a whole missing section', () => {
+    const current = fru.parseFruImage(makeImage());
+    const incoming = fru.parseFruImage(makeImage());
+    incoming.sections = incoming.sections.filter(section => section.key !== 'chassis');
+    sectionOf(incoming, 'product').fields.splice(7, 1);
+
+    const diff = fru.diffImages(current, incoming);
+    expect(diff.changes.some(item => item.to === '该区不存在')).toBe(true);
+    expect(diff.changes.some(item => item.to === '（该字段被移除）')).toBe(true);
+  });
+
+  test('should be a no-op for invalid images', () => {
+    expect(fru.diffImages(null, null).count).toBe(0);
+    expect(fru.diffImages({ valid: false }, { valid: true, sections: [] }).count).toBe(0);
+  });
+});
+
+describe('fru.compareImages', () => {
+  test('should pass for identical buffers', () => {
+    const image = makeImage();
+    expect(fru.compareImages(image, Buffer.from(image)))
+      .toMatchObject({ ok: true, diffCount: 0, firstDiffOffset: -1, lengthMismatch: false });
+  });
+
+  test('should locate the first difference', () => {
+    const expected = makeImage();
+    const actual = Buffer.from(expected);
+    actual[123] = (actual[123] + 1) & 0xff;
+
+    const result = fru.compareImages(expected, actual);
+    expect(result.ok).toBe(false);
+    expect(result.diffCount).toBe(1);
+    expect(result.firstDiffOffset).toBe(123);
+  });
+
+  test('should detect a length mismatch', () => {
+    const expected = makeImage();
+    const result = fru.compareImages(expected, expected.subarray(0, 1024));
+    expect(result.ok).toBe(false);
+    expect(result.lengthMismatch).toBe(true);
+  });
+});

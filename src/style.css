@@ -1440,6 +1440,96 @@ body.dialog-open .xterm-helper-textarea {
   to { transform: rotate(360deg); }
 }
 
+/* 刷写确认框：整区覆盖不可逆，差异列表要看得清 */
+.fru-flash-dialog {
+  width: 580px;
+  max-width: 92vw;
+}
+
+.fru-flash-dialog .dialog-body {
+  max-height: 62vh;
+  overflow-y: auto;
+}
+
+.fru-flash-meta {
+  margin: 2px 0 var(--space-md);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.fru-flash-diff-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.fru-flash-diff {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--surface-sunken);
+}
+
+.fru-flash-diff-empty {
+  padding: var(--space-md);
+  font-size: 11.5px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.fru-flash-diff-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 1.15fr) minmax(0, 1fr) 14px minmax(0, 1fr);
+  gap: var(--space-sm);
+  align-items: center;
+  padding: 5px var(--space-md);
+  font-size: 11.5px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.fru-flash-diff-row:last-child {
+  border-bottom: none;
+}
+
+.fru-flash-diff-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+.fru-flash-diff-from {
+  overflow-wrap: anywhere;
+  color: var(--text-muted);
+}
+
+.fru-flash-diff-arrow {
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.fru-flash-diff-to {
+  overflow-wrap: anywhere;
+  color: var(--warning);
+}
+
+.fru-flash-diff-more {
+  padding: 5px var(--space-md);
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.fru-note-danger {
+  margin-top: var(--space-md);
+  border-top-color: rgba(224, 85, 97, 0.3);
+  color: var(--danger);
+}
+
 @media (max-width: 900px) {
   .fru-table-head,
   .fru-field-row {

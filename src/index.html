@@ -202,6 +202,7 @@
           <select id="fru-select" class="fru-select" title="选择要读取 / 编辑的 FRU 设备"></select>
           <button id="btn-fru-refresh" class="btn btn-primary" title="重新列出 FRU 设备并读取当前设备字段">刷新</button>
           <button id="btn-fru-backup" class="btn">导出备份</button>
+          <button id="btn-fru-flash" class="btn btn-danger" title="用本地 bin 文件整体覆盖该 FRU">刷写</button>
         </div>
 
         <div class="fru-summary">
@@ -353,6 +354,37 @@
       <div class="dialog-footer">
         <button class="btn" id="fru-dialog-cancel">取消</button>
         <button class="btn btn-primary" id="fru-dialog-save">写入</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- FRU Flash Dialog（整区覆盖：写前自动备份 + 逐字节回读校验） -->
+  <div id="fru-flash-dialog" class="dialog-overlay" style="display: none;">
+    <div class="dialog fru-flash-dialog">
+      <div class="dialog-header">
+        <h3>刷写 FRU（整区覆盖）</h3>
+        <button class="dialog-close" id="fru-flash-close">&times;</button>
+      </div>
+      <div class="dialog-body">
+        <div class="form-group">
+          <label>待写入文件</label>
+          <div class="fru-readonly fru-readonly-mono" id="fru-flash-file"></div>
+        </div>
+        <div class="fru-flash-meta" id="fru-flash-meta"></div>
+        <div class="fru-flash-diff-head">
+          <span>与设备当前值的差异</span>
+          <span id="fru-flash-diff-count"></span>
+        </div>
+        <div class="fru-flash-diff" id="fru-flash-diff"></div>
+        <div class="fru-note fru-note-danger">整区覆盖会按文件内容重写该 FRU 的全部字节（含区长度、padding 与校验和），不可撤销。写入前会把当前镜像自动备份到系统临时目录。</div>
+        <div class="fru-progress" id="fru-flash-progress" style="display: none;">
+          <span class="fru-spinner"></span>
+          <span class="fru-progress-text" id="fru-flash-progress-text"></span>
+        </div>
+      </div>
+      <div class="dialog-footer">
+        <button class="btn" id="fru-flash-cancel">取消</button>
+        <button class="btn btn-danger" id="fru-flash-confirm">确认刷写</button>
       </div>
     </div>
   </div>
