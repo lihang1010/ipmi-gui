@@ -60,6 +60,10 @@
           <button id="btn-sol-save" class="btn btn-ghost">保存日志</button>
           <button id="btn-sol-logdir" class="btn btn-ghost">日志目录</button>
           <span id="sol-logdir-text" class="logdir-display"></span>
+          <label class="checkbox-label" data-tooltip="勾选后，每次启动 SOL 都会在日志目录下自动新建 sol_&lt;IP&gt;_&lt;时间&gt;.log 并实时写入终端内容（含颜色控制符，用 less -R 或浏览器打开可正常查看）。默认不勾选">
+            <input type="checkbox" id="sol-autosave">
+            自动保存
+          </label>
           <span class="separator"></span>
           <button id="btn-sol-clear" class="btn btn-ghost">清屏</button>
         </div>

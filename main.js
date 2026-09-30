@@ -197,6 +197,52 @@ ipcMain.handle('sol:close', async (event, tabId, server) => {
   return deactivateSolSession(server);
 });
 
+// ========== SOL 日志自动保存 ==========
+// 每个标签一个追加写流。刻意不复用 file:save —— 那是「弹保存框 + 全量覆盖」，
+// 逐帧追加会反复弹框并互相覆盖。
+
+/** tabId -> fs.WriteStream */
+const solLogStreams = {};
+
+/**
+ * 打开某标签的日志文件（追加模式）
+ * @returns {{success:boolean, path?:string, error?:string}}
+ */
+ipcMain.handle('sol:log-open', (event, tabId, filePath) => {
+  if (!tabId || !filePath) return { success: false, error: '缺少参数' };
+
+  // 同标签重复开流时先收掉旧的，避免句柄泄漏
+  if (solLogStreams[tabId]) {
+    try { solLogStreams[tabId].end(); } catch (e) { /* 已关闭 */ }
+    delete solLogStreams[tabId];
+  }
+
+  try {
+    const stream = fs.createWriteStream(filePath, { flags: 'a' });
+    // 写失败（磁盘满 / 权限）只放弃该标签的录制，不打断 SOL 会话
+    stream.on('error', () => { delete solLogStreams[tabId]; });
+    solLogStreams[tabId] = stream;
+    return { success: true, path: filePath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// 追加终端输出（PTY 原始流，含 ANSI 转义，内容与实时终端一致）
+ipcMain.on('sol:log-write', (event, tabId, data) => {
+  const stream = solLogStreams[tabId];
+  if (stream && stream.writable) stream.write(data);
+});
+
+// 关闭并冲刷日志文件
+ipcMain.handle('sol:log-close', (event, tabId) => {
+  const stream = solLogStreams[tabId];
+  if (!stream) return { success: true };
+  try { stream.end(); } catch (e) { /* 已关闭 */ }
+  delete solLogStreams[tabId];
+  return { success: true };
+});
+
 // ========== 文件操作 ==========
 
 // 保存文件

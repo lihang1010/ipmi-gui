@@ -57,7 +57,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // SOL IPC 监听
   ipcRenderer.on('sol:data', (event, { tabId, data }) => {
     const tab = solTabs.find(t => t.id === tabId);
-    if (tab && tab.terminal) tab.terminal.write(data);
+    if (!tab) return;
+    if (tab.terminal) tab.terminal.write(data);
+    // 自动保存：写入 PTY 原始流，内容与实时终端一致
+    if (tab.logFile) ipcRenderer.send('sol:log-write', tabId, data);
   });
 
   ipcRenderer.on('sol:exit', (event, { tabId, exitCode }) => {
@@ -205,6 +208,9 @@ function closeSolTab(tabId) {
   if (tabIndex === -1) return;
 
   const tab = solTabs[tabIndex];
+
+  // 收掉自动保存的日志流（若有）
+  stopSolLog(tab).catch(() => {});
 
   // 释放主进程中的 PTY 并 deactivate 会话，避免关闭标签后进程泄漏
   ipcRenderer.invoke('sol:close', tab.id, tab.server || null).catch(() => {});
@@ -474,6 +480,20 @@ function bindEvents() {
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
   document.getElementById('btn-sol-save').addEventListener('click', saveSolLog);
   document.getElementById('btn-sol-logdir').addEventListener('click', selectLogDir);
+
+  // 自动保存开关：改完立刻持久化，并同步作用到已在运行的 SOL 标签
+  const autoSaveEl = document.getElementById('sol-autosave');
+  autoSaveEl.checked = isSolAutoSaveEnabled();
+  autoSaveEl.addEventListener('change', () => {
+    const config = getConfig();
+    config.settings = config.settings || {};
+    config.settings.autoSaveSol = autoSaveEl.checked;
+    saveConfig();
+    // 该设置只在 startSol 时被读取，中途改开关必须显式同步一次：
+    // 否则「取消勾选」后当前会话仍会继续往文件里写
+    applyAutoSaveToRunningTabs(autoSaveEl.checked);
+    showStatus('connected', autoSaveEl.checked ? '已开启日志自动保存' : '已关闭日志自动保存');
+  });
   document.getElementById('btn-sol-clear').addEventListener('click', () => {
     const activeTab = getActiveTab();
     if (activeTab && activeTab.terminal) activeTab.terminal.clear();
@@ -843,10 +863,13 @@ async function startSol() {
     if (result.success) {
       tab.isRunning = true;
       tab.ptyPid = result.pid;
-      showStatus('connected', server.name);
       updateSolTabStatus(tab.id, 'running');
       updateSolButtons();
       tab.terminal.focus();
+
+      // PTY 起来之后再开日志流，避免丢掉第一屏输出
+      const logging = isSolAutoSaveEnabled() ? await startSolLog(tab) : false;
+      showStatus('connected', logging ? server.name + ' · 日志自动保存中' : server.name);
     } else {
       showStatus('error', '连接失败');
       await safeAlert('启动 SOL 失败:\n' + result.error);
@@ -881,6 +904,86 @@ async function stopSol() {
   } finally {
     btn.classList.remove('loading');
   }
+}
+
+/** 是否开启 SOL 自动保存（config.settings.autoSaveSol，默认关闭） */
+function isSolAutoSaveEnabled() {
+  return getConfig().settings?.autoSaveSol === true;
+}
+
+/**
+ * 生成 SOL 日志文件名（不含目录）
+ *
+ * 沿用「保存日志」按钮的命名规则，末尾追加 tabId 片段：多个标签可能连同一台
+ * 服务器，不带后缀会互相覆盖。
+ *
+ * @param {object|null} server
+ * @param {string} tabId
+ * @param {Date} [now] 便于测试注入
+ * @returns {string}
+ */
+function buildSolLogName(server, tabId, now = new Date()) {
+  const utc8 = new Date(now.getTime() + (8 * 60 * 60 * 1000));
+  const timestamp = utc8.toISOString().replace(/[:.]/g, '-').slice(0, 19).replace('T', '_');
+  const host = (server && server.host) ? server.host : 'unknown';
+  // tabId 形如 sol-1；去掉非法字符，避免拼出路径分隔符
+  const suffix = String(tabId || 'x').replace(/[^a-zA-Z0-9_-]/g, '').slice(-6) || 'x';
+  return `sol_${host}_${timestamp}_${suffix}.log`;
+}
+
+/**
+ * 为标签开启自动保存：生成路径并让主进程打开写流
+ * @returns {Promise<boolean>} 是否成功
+ */
+async function startSolLog(tab) {
+  tab.logFile = null;
+  try {
+    const filePath = require('path').join(getLogDir(), buildSolLogName(tab.server, tab.id));
+    const result = await ipcRenderer.invoke('sol:log-open', tab.id, filePath);
+    if (result && result.success) {
+      tab.logFile = result.path;
+      return true;
+    }
+  } catch (e) {
+    // 落盘失败不该影响 SOL 会话，静默降级为不记录
+  }
+  return false;
+}
+
+/**
+ * 关闭标签的日志流
+ * @returns {Promise<string|null>} 之前使用的文件路径
+ */
+async function stopSolLog(tab) {
+  if (!tab || !tab.logFile) return null;
+  const usedPath = tab.logFile;
+  tab.logFile = null;
+  try {
+    await ipcRenderer.invoke('sol:log-close', tab.id);
+  } catch (e) {
+    // 主进程不可达时忽略，句柄随进程退出释放
+  }
+  return usedPath;
+}
+
+/**
+ * 把自动保存开关同步到已经在运行的 SOL 标签
+ *
+ * 该设置只在 startSol 时被读取，所以中途改开关必须显式同步一次：
+ *   - 关掉：立刻收掉所有正在写的日志流（否则用户以为关了，文件还在长）
+ *   - 打开：给正在运行的标签补开日志流，从当前时刻开始记录
+ *
+ * @param {boolean} enabled
+ */
+function applyAutoSaveToRunningTabs(enabled) {
+  solTabs.forEach(tab => {
+    if (!tab.isRunning) return;
+    if (enabled && !tab.logFile) {
+      startSolLog(tab).catch(() => {});
+    } else if (!enabled && tab.logFile) {
+      stopSolLog(tab).catch(() => {});
+    }
+  });
 }
 
 async function saveSolLog() {

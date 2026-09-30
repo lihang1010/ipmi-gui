@@ -395,7 +395,7 @@ fullScan 扫整个 /24 网段需 30s 超时。
 
 | 面板 | data-tab | 关键方法 |
 |------|----------|---------|
-| SOL 终端 | sol | startSol(), stopSol(), addSolTab() |
+| SOL 终端 | sol | startSol(), stopSol(), addSolTab(), startSolLog(), stopSolLog() |
 | 收藏夹 | favorites | favorites.execute(), favorites.select(), favorites.setCategoryFilter(), favorites.importFavorites() |
 | 网络扫描 | scan | scanner.fullScan(), addSingleScanResult() |
 | 电源 | power | executePower(action) |

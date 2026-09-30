@@ -94,6 +94,10 @@ jest.mock('xterm', () => ({
     blur: jest.fn(),
     dispose: jest.fn(),
     onData: jest.fn(),
+    // 主题切换会改 terminal.options.theme，mock 里必须有这个字段
+    options: {},
+    rows: 30,
+    refresh: jest.fn(),
     loadAddon: jest.fn()
   }))
 }));
@@ -190,6 +194,7 @@ describe('Renderer Module', () => {
   const { ipcRenderer } = require('electron');
   const configStore = require('../src/modules/configStore');
   const { safeAlert, safeConfirm } = require('../src/modules/modal');
+const { saveConfig, getConfig, setConfig } = require('../src/modules/configStore');
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -729,6 +734,147 @@ describe('Renderer Module', () => {
       }
       expect(tab.isRunning).toBe(false);
       expect(tab.ptyPid).toBeNull();
+    });
+  });
+
+  /**
+   * SOL 日志自动保存开关
+   *
+   * 落盘本身在主进程（sol:log-open/write/close），这里只覆盖渲染层的契约：
+   * 默认关闭、勾选后持久化、取消勾选写回 false。
+   */
+  describe('SOL 日志自动保存开关', () => {
+    const restoreDom = () => {
+      document.getElementById = jest.fn((id) => {
+        if (!mockDomElements[id]) mockDomElements[id] = createMockElement(id);
+        return mockDomElements[id];
+      });
+    };
+
+    /** 触发最近一次绑定的 change 回调 */
+    const fireChange = (el) => {
+      const calls = el.addEventListener.mock.calls.filter(c => c[0] === 'change');
+      expect(calls.length).toBeGreaterThan(0);
+      calls[calls.length - 1][1]();
+    };
+
+    beforeEach(() => {
+      setConfig({ servers: [], settings: {}, favorites: [] });
+      restoreDom();
+      domReadyHandlers.forEach(handler => handler());
+    });
+
+    test('默认应为不勾选', () => {
+      expect(document.getElementById('sol-autosave').checked).toBe(false);
+    });
+
+    test('勾选后应写入 config.settings.autoSaveSol = true', () => {
+      const el = document.getElementById('sol-autosave');
+      el.checked = true;
+      fireChange(el);
+
+      expect(getConfig().settings.autoSaveSol).toBe(true);
+      expect(saveConfig).toHaveBeenCalled();
+    });
+
+    test('取消勾选应写回 false', () => {
+      // 先开一次，模拟之前已保存过
+      const el = document.getElementById('sol-autosave');
+      el.checked = true;
+      fireChange(el);
+
+      el.checked = false;
+      fireChange(el);
+
+      expect(getConfig().settings.autoSaveSol).toBe(false);
+    });
+
+    test('已保存为开启时，重新绑定应恢复勾选状态', () => {
+      setConfig({ servers: [], settings: { autoSaveSol: true }, favorites: [] });
+      restoreDom();
+      domReadyHandlers.forEach(handler => handler());
+
+      expect(document.getElementById('sol-autosave').checked).toBe(true);
+    });
+  });
+
+  /**
+   * 自动保存与「运行中的会话」的联动
+   *
+   * 回归点：设置原先只在 startSol 时读取，中途取消勾选后当前会话仍会继续写文件。
+   */
+  describe('SOL 自动保存与运行中会话联动', () => {
+    /** 取某个元素上最近一次绑定的指定事件回调 */
+    const fire = (id, type) => {
+      const calls = document.getElementById(id).addEventListener.mock.calls
+        .filter(c => c[0] === type);
+      expect(calls.length).toBeGreaterThan(0);
+      return calls[calls.length - 1][1];
+    };
+
+    /** 初始化 DOM/配置，选中唯一那台服务器，并启动一次 SOL */
+    const startSolWithServer = async (autoSave) => {
+      setConfig({
+        servers: [{ id: 's1', name: 'TestSrv', host: '192.168.1.1' }],
+        settings: { autoSaveSol: autoSave },
+        favorites: []
+      });
+      document.getElementById = jest.fn((id) => {
+        if (!mockDomElements[id]) mockDomElements[id] = createMockElement(id);
+        return mockDomElements[id];
+      });
+      domReadyHandlers.forEach(handler => handler());
+      await new Promise(r => setImmediate(r));
+
+      document.getElementById('server-select').value = 's1';
+      fire('server-select', 'change')({ target: { value: 's1' } });
+
+      ipcRenderer.invoke.mockResolvedValue({ success: true, pid: 1, path: 'C:\\logs\\sol_x.log' });
+      await fire('btn-sol-start', 'click')();
+    };
+
+    test('勾选时启动 SOL 应打开日志文件，文件名带 IP 与标签后缀', async () => {
+      await startSolWithServer(true);
+
+      const opened = ipcRenderer.invoke.mock.calls.filter(c => c[0] === 'sol:log-open');
+      expect(opened).toHaveLength(1);
+      // tabCounter 是模块级、跨用例累加，不假定具体编号
+      expect(opened[0][1]).toMatch(/^sol-\d+$/);
+      expect(opened[0][2]).toMatch(/sol_192\.168\.1\.1_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}_sol-\d+\.log$/);
+    });
+
+    test('未勾选时启动 SOL 不应打开日志文件', async () => {
+      await startSolWithServer(false);
+
+      expect(ipcRenderer.invoke.mock.calls.some(c => c[0] === 'sol:log-open')).toBe(false);
+    });
+
+    test('中途取消勾选，应立刻关闭正在记录的流', async () => {
+      await startSolWithServer(true);
+      expect(ipcRenderer.invoke.mock.calls.some(c => c[0] === 'sol:log-open')).toBe(true);
+
+      const el = document.getElementById('sol-autosave');
+      el.checked = false;
+      fire('sol-autosave', 'change')();
+
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('sol:log-close', expect.any(String));
+    });
+
+    test('中途打开勾选，应给正在运行的标签补开日志流', async () => {
+      await startSolWithServer(false);
+      expect(ipcRenderer.invoke.mock.calls.some(c => c[0] === 'sol:log-open')).toBe(false);
+
+      ipcRenderer.invoke.mockClear();
+      ipcRenderer.invoke.mockResolvedValue({ success: true, path: 'C:\\logs\\sol_x.log' });
+
+      const el = document.getElementById('sol-autosave');
+      el.checked = true;
+      fire('sol-autosave', 'change')();
+
+      // applyAutoSaveToRunningTabs 内部是异步的，等一拍
+      await new Promise(r => setImmediate(r));
+
+      expect(ipcRenderer.invoke.mock.calls.some(c => c[0] === 'sol:log-open')).toBe(true);
     });
   });
 
