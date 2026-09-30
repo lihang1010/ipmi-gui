@@ -49,7 +49,7 @@ ipmi-gui-electron/
 │       ├── networkScanner.js# 网络扫描
 │       ├── fru.js           # FRU 镜像解析/命令构建/结果判定 (纯函数)
 │       └── fruView.js       # FRU 面板渲染与写入编排 (写入->重新读取校验)
-├── __tests__/               # 单元测试 (19 套件)
+├── __tests__/               # 单元测试 (21 套件)
 └── coverage/                # 覆盖率报告 (已被 .gitignore 忽略)
 ```
 
@@ -144,7 +144,7 @@ webPreferences: {
 ### 网络扫描流程
 
 ```
-CIDR 展开主机 (cidrToHosts, /24~/30)
+CIDR 展开主机 (cidrToHosts, /16~/30；按 32 位整数对齐，支持第 4 段指定子网)
    |
    +-- Ping 扫描 (可关闭：usePing=false 时跳过，直接对全部地址扫端口;
    |               Windows 的 -w 单位为毫秒)
@@ -270,7 +270,7 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
 - fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
 - **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
-- 共 535 用例，21 套件
+- 共 543 用例，21 套件
 
 ---
 
@@ -373,6 +373,8 @@ ${arr.map(s => \`...\`)} 可能解析异常，优先字符串拼接。
 
 ### 7. 测试超时
 fullScan 扫整个 /24 网段需 30s 超时。
+`cidrToHosts` 支持 /16 ~ /30：/16 会展开 65534 个地址（受 MAX_SCAN_HOSTS 上限保护），
+所以测试只断言展开结果，不要真的去扫。
 
 ### 8. 密码安全
 配置文件中密码明文存储，无加密。

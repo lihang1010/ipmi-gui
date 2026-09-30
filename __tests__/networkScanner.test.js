@@ -308,21 +308,66 @@ describe('NetworkScanner Module', () => {
       expect(hosts[253]).toBe('192.168.1.254');
     });
 
-    test('should expand /25 to 126 hosts', () => {
-      expect(scanner.cidrToHosts('192.168.1', 25)).toHaveLength(126);
+    test('should expand /25 to the first 126 hosts', () => {
+      const hosts = scanner.cidrToHosts('192.168.1', 25);
+      expect(hosts).toHaveLength(126);
+      expect(hosts[0]).toBe('192.168.1.1');
+      expect(hosts[125]).toBe('192.168.1.126');
+    });
+
+    test('should honour the fourth octet instead of dropping it', () => {
+      // 旧实现只取前三段，192.168.1.128/25 会被算成 192.168.1.0/25，永远只能扫前半段
+      const hosts = scanner.cidrToHosts('192.168.1.128', 25);
+      expect(hosts).toHaveLength(126);
+      expect(hosts[0]).toBe('192.168.1.129');
+      expect(hosts[125]).toBe('192.168.1.254');
+    });
+
+    test('should align an unaligned address to its network number', () => {
+      // 192.168.1.4/30 的网络号是 .4，可用地址 .5 ~ .6
+      expect(scanner.cidrToHosts('192.168.1.4', 30)).toEqual(['192.168.1.5', '192.168.1.6']);
     });
 
     test('should expand /30 to 2 usable hosts', () => {
       expect(scanner.cidrToHosts('192.168.1', 30)).toEqual(['192.168.1.1', '192.168.1.2']);
     });
 
-    test('should clamp prefixes lower than /24 to /24', () => {
-      expect(scanner.cidrToHosts('192.168.1', 16)).toHaveLength(254);
+    test('should expand /22 across octet boundaries', () => {
+      // 旧实现被 Math.min(254, ...) 截断成 254 个
+      const hosts = scanner.cidrToHosts('192.168.1.0', 22);
+      expect(hosts).toHaveLength(1022);
+      expect(hosts[0]).toBe('192.168.0.1');
+      expect(hosts[1021]).toBe('192.168.3.254');
+    });
+
+    test('should expand /16 without truncating', () => {
+      const hosts = scanner.cidrToHosts('10.0.0.0', 16);
+      expect(hosts).toHaveLength(scanner.MAX_SCAN_HOSTS - 2);
+      expect(hosts[0]).toBe('10.0.0.1');
+      expect(hosts[hosts.length - 1]).toBe('10.0.255.254');
+    });
+
+    test('should clamp prefixes shorter than /16 to /16', () => {
+      // 旧实现会把 16 抬成 24 只给 254 个，现在保真展开
+      const hosts = scanner.cidrToHosts('10.0.0.0', 8);
+      expect(hosts).toHaveLength(scanner.MAX_SCAN_HOSTS - 2);
+      expect(hosts[0]).toBe('10.0.0.1');
+    });
+
+    test('should clamp prefixes longer than /30 to /30', () => {
+      expect(scanner.cidrToHosts('192.168.1', 32)).toHaveLength(2);
     });
 
     test('should default to /24 when cidr is invalid', () => {
       expect(scanner.cidrToHosts('192.168.1')).toHaveLength(254);
       expect(scanner.cidrToHosts('192.168.1', 'abc')).toHaveLength(254);
+    });
+
+    test('should return an empty list for an invalid ip', () => {
+      expect(scanner.cidrToHosts('abc', 24)).toEqual([]);
+      expect(scanner.cidrToHosts('192.168.1.300', 24)).toEqual([]);
+      expect(scanner.cidrToHosts('', 24)).toEqual([]);
+      expect(scanner.cidrToHosts(null, 24)).toEqual([]);
     });
   });
 

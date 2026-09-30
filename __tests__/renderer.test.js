@@ -189,7 +189,7 @@ const domReadyHandlers = document.addEventListener.mock.calls
 describe('Renderer Module', () => {
   const { ipcRenderer } = require('electron');
   const configStore = require('../src/modules/configStore');
-  const { safeAlert } = require('../src/modules/modal');
+  const { safeAlert, safeConfirm } = require('../src/modules/modal');
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -584,9 +584,75 @@ describe('Renderer Module', () => {
 
       expect(safeAlert).not.toHaveBeenCalled();
 
+      // 三段式补成四段；第 4 段不再被丢掉，所以传下去的是完整地址
       expect(ipcRenderer.invoke).toHaveBeenCalledWith('scan:start', {
-        network: '192.168.1', cidr: 24, timeout: 200, usePing: false
+        network: '192.168.1.0', cidr: 24, timeout: 200, usePing: false
       });
+    });
+
+    test('startScan 应保留网段第 4 段（不再只取前三段）', async () => {
+      document.getElementById = jest.fn((id) => {
+        if (!mockDomElements[id]) mockDomElements[id] = createMockElement(id);
+        return mockDomElements[id];
+      });
+
+      domReadyHandlers.forEach(handler => handler());
+      await new Promise(resolve => setImmediate(resolve));
+
+      // /25 只有 126 个地址，不该触发大网段确认
+      document.getElementById('scan-subnet').value = '192.168.1.128';
+      document.getElementById('scan-cidr').value = '25';
+      document.getElementById('scan-timeout').value = '200';
+      document.getElementById('scan-use-ping').checked = true;
+
+      const clicks = document.getElementById('btn-scan-start').addEventListener.mock.calls
+        .filter(call => call[0] === 'click');
+
+      safeConfirm.mockClear();
+      ipcRenderer.invoke.mockResolvedValueOnce({ success: true, results: [] });
+      await clicks[clicks.length - 1][1]();
+
+      expect(safeConfirm).not.toHaveBeenCalled();
+      expect(safeAlert).not.toHaveBeenCalled();
+      expect(ipcRenderer.invoke).toHaveBeenCalledWith('scan:start', {
+        network: '192.168.1.128', cidr: 25, timeout: 200, usePing: true
+      });
+    });
+
+    test('大网段应先弹确认，用户取消则不发起扫描', async () => {
+      document.getElementById = jest.fn((id) => {
+        if (!mockDomElements[id]) mockDomElements[id] = createMockElement(id);
+        return mockDomElements[id];
+      });
+
+      domReadyHandlers.forEach(handler => handler());
+      await new Promise(resolve => setImmediate(resolve));
+
+      document.getElementById('scan-subnet').value = '10.0.0.0';
+      document.getElementById('scan-cidr').value = '16';
+      document.getElementById('scan-timeout').value = '200';
+      document.getElementById('scan-use-ping').checked = true;
+
+      const clicks = document.getElementById('btn-scan-start').addEventListener.mock.calls
+        .filter(call => call[0] === 'click');
+
+      const invokeCallsBefore = ipcRenderer.invoke.mock.calls.length;
+      safeConfirm.mockClear();
+      safeConfirm.mockResolvedValueOnce(false);
+
+      await clicks[clicks.length - 1][1]();
+
+      // 确认框里要写清地址数量与预计耗时
+      expect(safeConfirm).toHaveBeenCalledTimes(1);
+      const prompt = safeConfirm.mock.calls[0][0];
+      expect(prompt).toContain('65534');
+      expect(prompt).toContain('确定开始吗');
+
+      // 取消后不得发起扫描
+      const scanCalls = ipcRenderer.invoke.mock.calls
+        .slice(invokeCallsBefore)
+        .filter(call => call[0] === 'scan:start');
+      expect(scanCalls).toHaveLength(0);
     });
 
     test('should stop scan via scan:stop', async () => {

@@ -213,29 +213,74 @@ async function runWithLimit(tasks, limit, onItemDone) {
   return results;
 }
 
+/** 点分十进制 IPv4 → 32 位无符号整数；非法返回 null */
+function ipToInt(ip) {
+  const parts = String(ip == null ? '' : ip).trim().split('.');
+  if (parts.length !== 4) return null;
+
+  let value = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) return null;
+    const n = parseInt(part, 10);
+    if (n > 255) return null;
+    // 用乘法而非左移：128.x 以上用 << 会把符号位带进来
+    value = value * 256 + n;
+  }
+  return value;
+}
+
+/** 32 位无符号整数 → 点分十进制 */
+function intToIp(value) {
+  return [
+    Math.floor(value / 16777216) % 256,
+    Math.floor(value / 65536) % 256,
+    Math.floor(value / 256) % 256,
+    value % 256
+  ].join('.');
+}
+
+/** 单次展开的主机数上限，避免 /16 之类的极端输入把内存撑爆 */
+const MAX_SCAN_HOSTS = 65536;
+
 /**
- * 将"网段前缀 + CIDR"展开为主机列表
- * 仅在最后一个八位组内划分，支持 /24 ~ /30；小于 /24 按 /24 处理
- * @param {string} prefix 前三段，如 192.168.1
- * @param {number} cidr 24 ~ 30
- * @returns {string[]} 主机 IP 列表
+ * 将网段 + CIDR 前缀展开为主机列表
+ * 支持 /16 ~ /30 全范围，按 32 位整数做子网运算
+ *
+ * 与旧实现的三点区别：
+ *  1. 不再把下限卡在 /24 —— /22、/16 这类大网段能正确展开
+ *  2. 不再只看前三段 —— '192.168.1.128' + /25 会先把该地址按掩码对齐到
+ *     网络号 192.168.1.128，再展开 .129 ~ .254；旧实现永远只能扫 0 段的 /25
+ *  3. /22 会正确跨网段（192.168.0.0 ~ 192.168.3.255），不再被截断成 254 个
+ *
+ * @param {string} ipOrPrefix 完整 IP（192.168.1.128）或前三段（192.168.1）
+ * @param {number} cidr 前缀长度 16 ~ 30，非法值按 24
+ * @returns {string[]} 主机 IP 列表（不含网络号与广播地址）
  */
-function cidrToHosts(prefix, cidr = 24) {
+function cidrToHosts(ipOrPrefix, cidr = 24) {
+  let raw = String(ipOrPrefix == null ? '' : ipOrPrefix).trim();
+  // 兼容旧调用：三段式补成四段
+  if (/^\d+\.\d+\.\d+$/.test(raw)) raw += '.0';
+
   const parsed = parseInt(cidr, 10);
-  const bits = Math.min(30, Math.max(24, isNaN(parsed) ? 24 : parsed));
-  const blockSize = Math.pow(2, 32 - bits);
-  const hostCount = Math.min(254, blockSize - 2);
+  const bits = Math.min(30, Math.max(16, isNaN(parsed) ? 24 : parsed));
+
+  const ipInt = ipToInt(raw);
+  if (ipInt === null) return [];
+
+  const mask = (0xFFFFFFFF << (32 - bits)) >>> 0;
+  const network = (ipInt & mask) >>> 0;
+  const broadcast = (network | (~mask >>> 0)) >>> 0;
 
   const hosts = [];
-  for (let i = 1; i <= hostCount; i++) {
-    hosts.push(`${prefix}.${i}`);
+  for (let value = network + 1; value < broadcast && hosts.length < MAX_SCAN_HOSTS; value++) {
+    hosts.push(intToIp(value));
   }
   return hosts;
 }
 
 /**
  * Ping 扫描
- * @param {string|string[]} subnetOrHosts 网段前缀（兼容旧调用）或显式主机列表
+ * @param {string|string[]} subnetOrHosts 网段（兼容旧调用，缺省按 /24）或显式主机列表
  */
 async function pingScan(subnetOrHosts, options = {}) {
   const { concurrency = 30, timeout = 300, onProgress } = options;
@@ -601,6 +646,7 @@ function stopScan() {
 module.exports = {
   getLocalNetwork,
   cidrToHosts,
+  MAX_SCAN_HOSTS,
   pingHost,
   scanPort,
   scanTcpPort,

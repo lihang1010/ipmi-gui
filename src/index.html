@@ -132,8 +132,8 @@
         <div class="panel-toolbar">
           <label>网段:</label>
           <input type="text" id="scan-subnet" class="input-command" placeholder="192.168.1.0" style="width:150px">
-          <label data-tooltip="支持 /24 ~ /30，低于 /24 按 /24 处理">/</label>
-          <input type="number" id="scan-cidr" class="input-command" value="24" min="24" max="30" style="width:60px">
+          <label data-tooltip="CIDR 前缀，支持 /16 ~ /30（前缀越短范围越大、越慢，超过 1024 个地址会先确认）。可配合第 4 段指定子网，如 192.168.1.128 配 /25 扫后半段">/</label>
+          <input type="number" id="scan-cidr" class="input-command" value="24" min="16" max="30" style="width:60px">
           <span class="separator"></span>
           <label>超时:</label>
           <input type="number" id="scan-timeout" class="input-command" value="200" min="50" max="1000" style="width:70px">

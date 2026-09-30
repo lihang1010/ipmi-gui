@@ -990,6 +990,44 @@ async function updateMemoryInfo() {
   }
 }
 
+/** 与主进程 networkScanner 的并发设置保持一致（Ping 50 / 端口 20） */
+const SCAN_PING_CONCURRENCY = 50;
+const SCAN_PORT_CONCURRENCY = 20;
+
+/** 展开后超过这个主机数就先弹确认（约 4 个 /24） */
+const SCAN_CONFIRM_THRESHOLD = 1024;
+
+/** 按 CIDR 前缀估算主机数（钳制范围与主进程 cidrToHosts 一致：16 ~ 30） */
+function estimateHostCount(cidr) {
+  const parsed = parseInt(cidr, 10);
+  const bits = Math.min(30, Math.max(16, isNaN(parsed) ? 24 : parsed));
+  return Math.max(0, Math.pow(2, 32 - bits) - 2);
+}
+
+function formatDuration(ms) {
+  if (ms < 1000) return '不到 1 秒';
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return '约 ' + sec + ' 秒';
+  const min = Math.round(sec / 60);
+  if (min < 60) return '约 ' + min + ' 分钟';
+  return '约 ' + (min / 60).toFixed(1) + ' 小时';
+}
+
+/**
+ * 粗估扫描耗时
+ * Ping 阶段并发 50，端口阶段并发 20，各加一点进程启动开销
+ */
+function estimateScanDuration(hostCount, timeout, usePing) {
+  const pingMs = usePing
+    ? Math.ceil(hostCount / SCAN_PING_CONCURRENCY) * (timeout + 40)
+    : 0;
+  // 开了 Ping 预探测时通常只有少量主机存活，按 10% 保守估；
+  // 跳过 Ping 则每个地址都要扫端口，按全量算
+  const portTargets = usePing ? Math.ceil(hostCount * 0.1) : hostCount;
+  const portMs = Math.ceil(portTargets / SCAN_PORT_CONCURRENCY) * (timeout + 20);
+  return pingMs + portMs;
+}
+
 async function startScan() {
   const subnet = document.getElementById('scan-subnet').value.trim();
   const cidr = parseInt(document.getElementById('scan-cidr').value) || 24;
@@ -997,16 +1035,29 @@ async function startScan() {
   // 默认勾选：先 Ping 探测存活再扫端口；不勾选则直接对全部地址扫端口
   const usePing = document.getElementById('scan-use-ping').checked;
 
-  // 兼容三段式 (192.168.1) 与四段式 (192.168.1.0)，后者取前三段作为网段
+  // 三段式 (192.168.1) 补成 192.168.1.0；四段式原样保留。
+  // 第 4 段是网段起点，如 192.168.1.128 配 /25 表示扫后半段，不能再丢掉它。
   if (!subnet || !subnet.match(/^\d+\.\d+\.\d+(\.\d+)?$/)) {
-    safeAlert('请输入有效的网段，如 192.168.1.0');
+    await safeAlert('请输入有效的网段，如 192.168.1.0 或 192.168.1.128');
     return;
   }
 
-  const network = subnet.split('.').slice(0, 3).join('.');
-  if (!isValidIP(network + '.1')) {
-    safeAlert('网段格式不正确，每段需在 0-255 之间\n\n示例: 192.168.1.0');
+  const network = subnet.split('.').length === 3 ? subnet + '.0' : subnet;
+  if (!isValidIP(network)) {
+    await safeAlert('网段格式不正确，每段需在 0-255 之间\n\n示例: 192.168.1.0');
     return;
+  }
+
+  // 大网段先确认，避免误设前缀后干等几十分钟
+  const hostCount = estimateHostCount(cidr);
+  if (hostCount > SCAN_CONFIRM_THRESHOLD) {
+    const ok = await safeConfirm(
+      '即将扫描 ' + hostCount + ' 个地址（/' + cidr + '）。\n\n' +
+      '按当前超时设置预计需要 ' +
+      formatDuration(estimateScanDuration(hostCount, timeout, usePing)) +
+      '，扫描期间可以随时点「停止」。\n\n确定开始吗？'
+    );
+    if (!ok) return;
   }
 
   // 更新UI状态

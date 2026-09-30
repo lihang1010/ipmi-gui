@@ -36,7 +36,7 @@ ipmi-gui-electron/
 │   ├── cygcrypto-1.0.0.dll
 │   └── cygz.dll
 │
-├── __tests__/                 # 单元测试 (19 套件)
+├── __tests__/                 # 单元测试 (21 套件)
 ├── assets/
 │   └── icon.ico               # 应用图标
 └── dist/                      # 构建产物 (win-unpacked + 安装包)
@@ -217,7 +217,9 @@ ipmi-gui-electron/
 ```
 用户点击"开始扫描"
     │
-    ├── renderer.js: cidrToHosts(network, cidr) → 主机列表 (/24~/30)
+    ├── renderer.js: 校验网段 + 大网段耗时确认（超过 1024 个地址先弹框）
+    │
+    ├── main.js: cidrToHosts(network, cidr) → 主机列表 (/16~/30，按 32 位整数对齐)
     │
     └── networkScanner.js: fullScan(network, { hosts })
             │
@@ -357,7 +359,7 @@ ipmi-gui-electron/
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 21 个 *.test.js | 535 |
+| 21 个 *.test.js | 543 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 
