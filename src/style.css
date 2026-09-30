@@ -178,6 +178,10 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  /* 窗口被拉得比顶栏自然宽度还窄时（实测约 1037px），让右侧徽标整组换到第二行。
+     只靠收缩 + 省略号的话，状态徽标会被压到只剩一条边，看着像「显示不完整」 */
+  flex-wrap: wrap;
+  row-gap: var(--space-sm);
   padding: var(--space-sm) var(--space-lg);
   background: var(--bg-surface);
   border-bottom: 1px solid var(--border-subtle);
@@ -238,6 +242,7 @@ body {
   gap: var(--space-md);
   -webkit-app-region: no-drag;
   min-width: 0;     /* 允许收缩，配合状态徽标内的省略号 */
+  margin-left: auto; /* 换到第二行时仍贴右对齐（space-between 对单元素行不生效） */
 }
 
 /* Status indicator */

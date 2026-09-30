@@ -197,18 +197,60 @@ describe('Main Process Logic', () => {
   });
 
   describe('Window Management', () => {
-    test('should create window with correct options', () => {
-      const opts = {
-        width: 1000,
-        height: 700,
-        minWidth: 800,
-        minHeight: 600,
-        title: 'IPMI 管理工具'
-      };
-      expect(opts.width).toBe(1000);
-      expect(opts.height).toBe(700);
-      expect(opts.minWidth).toBe(800);
-      expect(opts.minHeight).toBe(600);
+    const {
+      computeWindowSize, IDEAL_WIDTH, IDEAL_HEIGHT, MIN_WIDTH, MIN_HEIGHT
+    } = require('../src/modules/windowSize');
+
+    test('顶栏放得下：默认宽度覆盖最坏情况的自然宽度', () => {
+      // 实测自然宽度 1037px（左组 726 + 右组 251 + 内边距 32）
+      expect(IDEAL_WIDTH).toBeGreaterThanOrEqual(1037);
+      // 最坏情况：状态徽标到 max-width 260px 时 → 1037 + (260 - 69) = 1228
+      expect(IDEAL_WIDTH).toBeGreaterThanOrEqual(1228);
+      // 还要扣掉窗口边框：实测 1240 的窗口内容区只有 1224，横向被吃掉约 16px
+      expect(IDEAL_WIDTH - 16).toBeGreaterThanOrEqual(1228);
+      // 原缺陷：写死 1000px，右侧状态徽标被压到只剩一条边
+      expect(computeWindowSize({ width: 1920, height: 1080 }).width).toBe(IDEAL_WIDTH);
+    });
+
+    test('常见分辨率下取理想尺寸', () => {
+      expect(computeWindowSize({ width: 1920, height: 1080 }))
+        .toEqual({ width: IDEAL_WIDTH, height: IDEAL_HEIGHT });
+      expect(computeWindowSize({ width: 2560, height: 1440 }))
+        .toEqual({ width: IDEAL_WIDTH, height: IDEAL_HEIGHT });
+    });
+
+    test('小屏笔记本（1366x768）不超出屏幕工作区', () => {
+      const area = { width: 1366, height: 728 };
+      const { width, height } = computeWindowSize(area);
+      // 宽度仍取理想值（1160 < 1366 放得下），高度被工作区压低
+      expect(width).toBe(IDEAL_WIDTH);
+      expect(height).toBe(728 - 60);
+      expect(width).toBeLessThanOrEqual(area.width);
+      expect(height).toBeLessThanOrEqual(area.height);
+    });
+
+    test('屏幕介于最小与理想尺寸之间时贴着屏幕边缘留余量', () => {
+      expect(computeWindowSize({ width: 1120, height: 900 }))
+        .toEqual({ width: 1120 - 60, height: IDEAL_HEIGHT });
+    });
+
+    test('屏幕比最小尺寸还小时取最小尺寸兜底', () => {
+      expect(computeWindowSize({ width: 800, height: 600 }))
+        .toEqual({ width: MIN_WIDTH, height: MIN_HEIGHT });
+      expect(computeWindowSize({ width: 640, height: 480 }))
+        .toEqual({ width: MIN_WIDTH, height: MIN_HEIGHT });
+    });
+
+    test('拿不到屏幕信息时退回理想尺寸', () => {
+      expect(computeWindowSize()).toEqual({ width: IDEAL_WIDTH, height: IDEAL_HEIGHT });
+      expect(computeWindowSize({})).toEqual({ width: IDEAL_WIDTH, height: IDEAL_HEIGHT });
+      expect(computeWindowSize({ width: 0, height: NaN }))
+        .toEqual({ width: IDEAL_WIDTH, height: IDEAL_HEIGHT });
+    });
+
+    test('窗口最小尺寸与 BrowserWindow 的 minWidth / minHeight 一致', () => {
+      expect(MIN_WIDTH).toBe(800);
+      expect(MIN_HEIGHT).toBe(600);
     });
 
     test('should have correct webPreferences', () => {

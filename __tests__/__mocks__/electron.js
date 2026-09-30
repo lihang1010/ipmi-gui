@@ -41,11 +41,19 @@ const contextBridge = {
   exposeInMainWorld: jest.fn()
 };
 
+// 主窗口按屏幕工作区计算尺寸（main.js createWindow）
+const screen = {
+  getPrimaryDisplay: jest.fn(() => ({
+    workAreaSize: { width: 1920, height: 1040 }
+  }))
+};
+
 module.exports = {
   app,
   BrowserWindow,
   ipcMain,
   dialog,
   ipcRenderer,
-  contextBridge
+  contextBridge,
+  screen
 };

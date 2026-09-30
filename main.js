@@ -1,8 +1,9 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, screen } = require('electron');
 const { autoUpdater } = require('electron-updater');
 const path = require('path');
 const fs = require('fs');
 const pty = require('node-pty');
+const { computeWindowSize, MIN_WIDTH, MIN_HEIGHT } = require('./src/modules/windowSize');
 const { buildArgs, resolveIpmiToolPath, tokenizeCommand } = require('./src/modules/ipmiTool');
 const { getLocalNetwork, cidrToHosts, fullScan, stopScan } = require('./src/modules/networkScanner');
 
@@ -21,11 +22,15 @@ let ptyProcesses = {};  // 多标签支持：{ tabId: ptyProcess }
 
 // 创建主窗口
 function createWindow() {
+  // 尺寸按屏幕工作区算：顶栏自然宽度实测 1037px，写死 1000 会把右侧状态徽标挤没
+  // （详见 src/modules/windowSize.js）
+  const { width, height } = computeWindowSize(screen.getPrimaryDisplay().workAreaSize);
+
   mainWindow = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    minWidth: 800,
-    minHeight: 600,
+    width,
+    height,
+    minWidth: MIN_WIDTH,
+    minHeight: MIN_HEIGHT,
     title: 'IPMI 管理工具',
     webPreferences: {
       nodeIntegration: true,

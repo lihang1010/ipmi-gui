@@ -37,6 +37,7 @@ ipmi-gui-electron/
 │   ├── config/ipmi-credentials.json  # 默认凭据唯一来源
 │   └── modules/
 │       ├── configStore.js   # 配置读写 (唯一实现)
+│       ├── windowSize.js    # 主窗口初始尺寸（按屏幕工作区自适应）
 │       ├── ipmiTool.js      # 路径解析/参数构建/命令行分词 (主+渲染共用)
 │       ├── credentials.js   # 凭据模板读取
 │       ├── bmcVersion.js    # mc info 版本号解析（AMI/openUBMC 取字节规则）
@@ -280,7 +281,7 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
 - fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
 - **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
-- 共 557 用例，21 套件
+- 共 563 用例，21 套件
 
 ---
 

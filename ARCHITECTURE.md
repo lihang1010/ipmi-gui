@@ -86,7 +86,7 @@ ipmi-gui-electron/
 
 | 函数 | 职责 | 行数 |
 |------|------|------|
-| `createWindow()` | 创建主窗口 | 15 |
+| `createWindow()` | 创建主窗口（尺寸按屏幕工作区自适应） | 20 |
 | `getIpmiToolPath()` | 委托 `ipmiTool.resolveIpmiToolPath()`，缺失返回 null | 3 |
 | `deactivateSolSession()` | 执行 sol deactivate（sol:stop / sol:close 复用） | 26 |
 | IPC: `ipmi:execute` | 执行 IPMI 命令（参数经 tokenizeCommand 分词） | 30 |
@@ -360,7 +360,7 @@ ipmi-gui-electron/
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 21 个 *.test.js | 557 |
+| 21 个 *.test.js | 563 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 
@@ -390,6 +390,9 @@ ipmi-gui-electron/
 - ipmitool 调用用 shell 拼字符串 → 统一 `runIpmiCommand()`（execFile 逐参数传参）
 - 提示框向上弹出被窗口/面板裁切 → 统一向下弹出 + 左右对齐修饰
 - 窄窗口工具栏换行、状态徽标溢出 → 宽度压缩 + 省略号截断
+- 默认窗口写死 1000×700 而顶栏自然宽度实测 1037px（最坏 1228px）→ 最右侧状态徽标
+  被压得只剩一条边。改为按屏幕工作区自适应（`src/modules/windowSize.js`，纯函数可单测）；
+  窗口被手动拉窄时顶栏右侧整组换行，不再被挤出可视区
 
 ### 新增（v1.3）
 
