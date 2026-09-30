@@ -250,7 +250,9 @@ ipcMain.handle('scan:getLocalNetwork', () => getLocalNetwork());
 
 // 开始扫描，进度通过 scan:progress 推送
 ipcMain.handle('scan:start', async (event, options = {}) => {
-  const { network, cidr = 24, timeout = 200, usePing = true } = options || {};
+  // usePing 默认 false：实测直接扫端口比先 Ping 更快（约 3 倍）也更全
+  //（禁 Ping 的设备只有跳过 Ping 才扫得到）
+  const { network, cidr = 24, timeout = 200, usePing = false } = options || {};
   if (!network) {
     return { success: false, error: '缺少网段参数' };
   }

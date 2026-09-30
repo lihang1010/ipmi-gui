@@ -354,9 +354,16 @@ async function portScan(ips, options = {}) {
 
 /**
  * 完整扫描流程：Ping（可选）→ 端口扫描 → IPMI 验证
+ *
+ * usePing=false（默认，UI 里的「Ping 预探测」不勾选）直接对全部目标地址扫端口。
+ * 实测这比先 Ping 更快也更全：
+ *   - Ping 走外部 ping.exe 进程，exec 硬超时 2.4s 起步，且对不存在的地址要等满
+ *     ARP 解析失败（约 2~3s，-w 管不到）
+ *   - 端口探测用 net.Socket.setTimeout，到点即返回（0.2s 级），不受 ARP 影响
+ *   - 禁 Ping 的设备只有跳过 Ping 才扫描得到（实测就漏过一台）
+ * usePing=true 时先 Ping 筛存活，可减少端口探测的流量，但更慢。
+ *
  * @param {object} options
- *   usePing=false 时跳过 Ping，直接对全部目标地址做端口扫描
- *   （可发现禁 Ping 设备，但探测次数更多、更慢）
  */
 async function fullScan(subnet, options = {}) {
   const {

@@ -146,8 +146,12 @@ webPreferences: {
 ```
 CIDR 展开主机 (cidrToHosts, /16~/30；按 32 位整数对齐，支持第 4 段指定子网)
    |
-   +-- Ping 扫描 (可关闭：usePing=false 时跳过，直接对全部地址扫端口;
+   +-- Ping 扫描 (默认关闭！usePing=false 时跳过，直接对全部地址扫端口;
    |               Windows 的 -w 单位为毫秒)
+   |   !! 为何默认关：实测 62 个地址下，先 Ping 要 5.4s、不 Ping 只要 1.9s，
+   |      且不 Ping 多发现 1 台（那台禁 Ping，Ping 阶段直接漏掉）。原因是 Ping
+   |      走外部进程 + exec 硬超时 2.4s 起步且要等满 ARP，而端口探测用
+   |      net.Socket.setTimeout，0.2s 级到点即返回。
    |   !! 每台发 2 个包、并发 40。实测（Electron 主进程内，62 个地址）：
    |      「单包 + 并发 50 + exec 硬超时仅 700ms」会让 Ping 命中数在 7~29 之间
    |      乱跳，在线设备被判离线；改成 2 个包 + 硬超时 count*timeout+2000 后，
