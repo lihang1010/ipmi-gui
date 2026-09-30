@@ -18,6 +18,7 @@ const createMockElement = (id, props = {}) => ({
   classList: {
     add: jest.fn(),
     remove: jest.fn(),
+    toggle: jest.fn(),
     contains: jest.fn().mockReturnValue(false)
   },
   focus: jest.fn(),
@@ -97,6 +98,7 @@ jest.mock('xterm', () => ({
     // 主题切换会改 terminal.options.theme，mock 里必须有这个字段
     options: {},
     rows: 30,
+    cols: 120,
     refresh: jest.fn(),
     loadAddon: jest.fn()
   }))
@@ -875,6 +877,106 @@ const { saveConfig, getConfig, setConfig } = require('../src/modules/configStore
       await new Promise(r => setImmediate(r));
 
       expect(ipcRenderer.invoke.mock.calls.some(c => c[0] === 'sol:log-open')).toBe(true);
+    });
+  });
+
+  /**
+   * SOL 平铺布局
+   *
+   * 关键回归点：输入必须路由到「自己这个终端」对应的会话。
+   * 原实现用 getActiveTab()，平铺时在 A 窗口打字会把字符发到当前激活的 B 会话。
+   */
+  describe('SOL 平铺布局', () => {
+    const fire = (id, type) => {
+      const calls = document.getElementById(id).addEventListener.mock.calls
+        .filter(c => c[0] === type);
+      expect(calls.length).toBeGreaterThan(0);
+      return calls[calls.length - 1][1];
+    };
+
+    /** 初始化 DOM/配置，并选中唯一那台服务器 */
+    const setup = async (layout) => {
+      setConfig({
+        servers: [{ id: 's1', name: 'S1', host: '10.0.0.1' }],
+        settings: layout ? { solLayout: layout } : {},
+        favorites: []
+      });
+      document.getElementById = jest.fn((id) => {
+        if (!mockDomElements[id]) mockDomElements[id] = createMockElement(id);
+        return mockDomElements[id];
+      });
+      domReadyHandlers.forEach(handler => handler());
+      await new Promise(r => setImmediate(r));
+
+      document.getElementById('server-select').value = 's1';
+      fire('server-select', 'change')({ target: { value: 's1' } });
+    };
+
+    /** 连起两个 SOL 会话，返回两个终端的实例 */
+    const startTwoSessions = async () => {
+      ipcRenderer.invoke.mockResolvedValue({ success: true, pid: 1 });
+      const click = () => fire('btn-sol-start', 'click')();
+      await click();
+      await click();
+
+      const { Terminal } = require('xterm');
+      const terms = Terminal.mock.results.map(r => r.value);
+      expect(terms.length).toBeGreaterThanOrEqual(2);
+      // 取最后两个（beforeEach 的 clearAllMocks 已清空历史）
+      return { first: terms[terms.length - 2], second: terms[terms.length - 1] };
+    };
+
+    test('输入应路由到本终端对应的会话，而不是当前激活的', async () => {
+      await setup();
+      const { first, second } = await startTwoSessions();
+
+      const onDataOf = (t) => {
+        expect(t.onData.mock.calls.length).toBeGreaterThan(0);
+        return t.onData.mock.calls[0][0];
+      };
+
+      // 先确认「当前激活」的那个会发到自己（拿到它的 tabId 作为对照）
+      ipcRenderer.send.mockClear();
+      onDataOf(second)('b');
+      const secondWrite = ipcRenderer.send.mock.calls.find(c => c[0] === 'sol:write');
+      expect(secondWrite).toBeDefined();
+      const secondTabId = secondWrite[1];
+
+      // 关键：在第一个终端输入，不能发到第二个
+      ipcRenderer.send.mockClear();
+      onDataOf(first)('a');
+      const firstWrite = ipcRenderer.send.mock.calls.find(c => c[0] === 'sol:write');
+      expect(firstWrite).toBeDefined();
+      expect(firstWrite[1]).not.toBe(secondTabId);
+    });
+
+    test('切到平铺应加 tile 类并持久化', async () => {
+      await setup();
+      expect(getConfig().settings.solLayout).toBeUndefined();
+
+      fire('btn-sol-layout', 'click')();
+
+      expect(getConfig().settings.solLayout).toBe('tile');
+      expect(document.getElementById('sol-terminals').classList.toggle)
+        .toHaveBeenCalledWith('tile', true);
+    });
+
+    test('再由平铺切回单屏', async () => {
+      await setup('tile');
+
+      fire('btn-sol-layout', 'click')();
+
+      expect(getConfig().settings.solLayout).toBe('single');
+      expect(document.getElementById('sol-terminals').classList.toggle)
+        .toHaveBeenCalledWith('tile', false);
+    });
+
+    test('已保存为 tile 时初始化应直接应用，按钮显示「单屏」', async () => {
+      await setup('tile');
+
+      expect(document.getElementById('sol-terminals').classList.toggle)
+        .toHaveBeenCalledWith('tile', true);
+      expect(document.getElementById('btn-sol-layout').textContent).toBe('单屏');
     });
   });
 

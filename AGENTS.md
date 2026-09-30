@@ -280,7 +280,7 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
 - fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
 - **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
-- 共 545 用例，21 套件
+- 共 557 用例，21 套件
 
 ---
 
@@ -395,7 +395,7 @@ fullScan 扫整个 /24 网段需 30s 超时。
 
 | 面板 | data-tab | 关键方法 |
 |------|----------|---------|
-| SOL 终端 | sol | startSol(), stopSol(), addSolTab(), startSolLog(), stopSolLog() |
+| SOL 终端 | sol | startSol(), stopSol(), addSolTab(), startSolLog(), stopSolLog(), toggleSolLayout() |
 | 收藏夹 | favorites | favorites.execute(), favorites.select(), favorites.setCategoryFilter(), favorites.importFavorites() |
 | 网络扫描 | scan | scanner.fullScan(), addSingleScanResult() |
 | 电源 | power | executePower(action) |

@@ -1,3 +1,4 @@
+/* global ResizeObserver */
 /**
  * IPMI GUI - 主渲染进程
  */
@@ -86,7 +87,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
 // ========== SOL 多标签管理 ==========
 
-function createTerminal(container) {
+function createTerminal(container, tabId) {
   const term = new Terminal({
     // 终端配色跟随当前主题（见 theme.js 的 TERMINAL_THEMES）
     theme: theme.terminalTheme(currentTheme),
@@ -105,17 +106,38 @@ function createTerminal(container) {
   term.open(container);
   fit.fit();
 
+  // 输入必须路由到本终端对应的会话。平铺时若用 getActiveTab()，
+  // 在 A 窗口打字会把字符发到当时「激活」的 B 会话。
   term.onData((data) => {
-    const tab = getActiveTab();
+    const tab = solTabs.find(t => t.id === tabId);
     if (tab && tab.isRunning) {
-      ipcRenderer.send('sol:write', tab.id, data);
+      ipcRenderer.send('sol:write', tabId, data);
     }
   });
+
+  // 尺寸变化时重排并把新尺寸同步给 PTY。
+  // 用 ResizeObserver 而不是只在切标签时 fit：平铺下各 pane 尺寸互相独立，
+  // 窗口缩放与布局切换都会改变它们。
+  let resizeObserver = null;
+  if (typeof ResizeObserver !== 'undefined') {
+    resizeObserver = new ResizeObserver(() => {
+      try {
+        fit.fit();
+      } catch (e) {
+        return;   // 尚未完成布局
+      }
+      const tab = solTabs.find(t => t.id === tabId);
+      if (tab && tab.isRunning) {
+        ipcRenderer.send('sol:resize', tabId, term.cols, term.rows);
+      }
+    });
+    resizeObserver.observe(container);
+  }
 
   term.writeln('\x1b[38;2;91;155;213m  IPMI SOL 终端\x1b[0m');
   term.writeln('\x1b[38;2;107;107;117m  点击 [启动 SOL] 连接到服务器\x1b[0m');
 
-  return { terminal: term, fitAddon: fit, serializeAddon: serialize };
+  return { terminal: term, fitAddon: fit, serializeAddon: serialize, resizeObserver };
 }
 
 function addSolTab(server = null) {
@@ -123,14 +145,38 @@ function addSolTab(server = null) {
   const tabId = `sol-${tabCounter}`;
   const tabName = server ? `SOL-${tabCounter}: ${server.host}` : `SOL-${tabCounter}`;
 
-  // 创建终端容器
+  // 创建终端容器：标题栏（仅平铺时可见）+ xterm 挂载点
   const pane = document.createElement('div');
   pane.className = 'sol-terminal-pane';
   pane.id = `pane-${tabId}`;
+
+  const header = document.createElement('div');
+  header.className = 'sol-pane-header';
+  const title = document.createElement('span');
+  title.className = 'sol-pane-title';
+  title.textContent = tabName;
+  const paneClose = document.createElement('button');
+  paneClose.className = 'sol-pane-close';
+  paneClose.textContent = '×';
+  paneClose.title = '关闭此终端';
+  paneClose.addEventListener('click', () => closeSolTab(tabId));
+  header.appendChild(title);
+  header.appendChild(paneClose);
+
+  const body = document.createElement('div');
+  body.className = 'sol-pane-body';
+
+  pane.appendChild(header);
+  pane.appendChild(body);
   document.getElementById('sol-terminals').appendChild(pane);
 
+  // 平铺时点哪个 pane 就把它设为当前标签（stopSol / 保存日志 依赖这个概念）
+  pane.addEventListener('mousedown', () => {
+    if (activeTabId !== tabId) switchSolTab(tabId);
+  });
+
   // 创建终端
-  const { terminal, fitAddon, serializeAddon } = createTerminal(pane);
+  const { terminal, fitAddon, serializeAddon, resizeObserver } = createTerminal(body, tabId);
 
   // 创建标签数据
   const tabData = {
@@ -140,6 +186,7 @@ function addSolTab(server = null) {
     terminal: terminal,
     fitAddon: fitAddon,
     serializeAddon: serializeAddon,
+    resizeObserver: resizeObserver,
     ptyPid: null,
     isRunning: false,
     logFile: null
@@ -178,26 +225,32 @@ function renderSolTabs() {
 }
 
 function switchSolTab(tabId) {
-  // 隐藏所有面板
-  document.querySelectorAll('.sol-terminal-pane').forEach(p => p.classList.remove('active'));
-  document.querySelectorAll('.sol-tab').forEach(t => t.classList.remove('active'));
-
-  // 显示选中的面板
   const pane = document.getElementById(`pane-${tabId}`);
-  if (pane) {
-    pane.classList.add('active');
-    activeTabId = tabId;
+  if (!pane) return;
 
-    // 更新标签样式
-    const tabEl = document.querySelector(`.sol-tab[data-tab-id="${tabId}"]`);
-    if (tabEl) tabEl.classList.add('active');
+  activeTabId = tabId;
 
-    // 重新 fit 终端
-    const tab = getActiveTab();
-    if (tab && tab.fitAddon) {
-      setTimeout(() => tab.fitAddon.fit(), 50);
-      tab.terminal.focus();
-    }
+  // 单屏模式靠 .active 切换显隐；平铺模式下所有 pane 都可见（由 CSS 控制），
+  // 这里只负责标记「当前标签」并高亮标签栏
+  document.querySelectorAll('.sol-terminal-pane').forEach(p => p.classList.remove('active'));
+  pane.classList.add('active');
+
+  document.querySelectorAll('.sol-tab').forEach(t => t.classList.remove('active'));
+  const tabEl = document.querySelector(`.sol-tab[data-tab-id="${tabId}"]`);
+  if (tabEl) tabEl.classList.add('active');
+
+  // 该 pane 可能刚变为可见，等布局稳定后再 fit
+  const tab = solTabs.find(t => t.id === tabId);
+  if (tab && tab.fitAddon) {
+    setTimeout(() => {
+      try {
+        tab.fitAddon.fit();
+      } catch (e) {
+        return;
+      }
+      // 平铺时不抢焦点，否则新建标签会打断其他窗口正在进行的输入
+      if (!isSolTiled()) tab.terminal.focus();
+    }, 50);
   }
 
   updateSolButtons();
@@ -214,6 +267,11 @@ function closeSolTab(tabId) {
 
   // 释放主进程中的 PTY 并 deactivate 会话，避免关闭标签后进程泄漏
   ipcRenderer.invoke('sol:close', tab.id, tab.server || null).catch(() => {});
+
+  // 断开尺寸观察，避免泄漏
+  if (tab.resizeObserver) {
+    try { tab.resizeObserver.disconnect(); } catch (e) { /* 忽略 */ }
+  }
 
   // 销毁终端
   tab.terminal.dispose();
@@ -236,6 +294,55 @@ function closeSolTab(tabId) {
   }
 
   renderSolTabs();
+}
+
+/** SOL 布局：'tile' 平铺全部可见 / 'single' 单屏只看当前（默认 single） */
+function getSolLayout() {
+  return getConfig().settings?.solLayout === 'tile' ? 'tile' : 'single';
+}
+
+function isSolTiled() {
+  return getSolLayout() === 'tile';
+}
+
+/** 把布局应用到容器与按钮文案（不负责持久化） */
+function applySolLayout() {
+  const container = document.getElementById('sol-terminals');
+  if (!container) return;
+
+  const tiled = isSolTiled();
+  container.classList.toggle('tile', tiled);
+
+  const btn = document.getElementById('btn-sol-layout');
+  if (btn) {
+    btn.textContent = tiled ? '单屏' : '平铺';
+    btn.title = tiled ? '切换为单屏（只显示当前终端）' : '切换为平铺（同时显示所有终端）';
+  }
+
+  // 布局变了所有终端尺寸都会变，等布局稳定后逐个重排并同步 PTY
+  setTimeout(() => {
+    solTabs.forEach(tab => {
+      if (!tab.fitAddon) return;
+      try {
+        tab.fitAddon.fit();
+      } catch (e) {
+        return;
+      }
+      if (tab.isRunning) {
+        ipcRenderer.send('sol:resize', tab.id, tab.terminal.cols, tab.terminal.rows);
+      }
+    });
+  }, 60);
+}
+
+function toggleSolLayout() {
+  const next = isSolTiled() ? 'single' : 'tile';
+  const config = getConfig();
+  config.settings = config.settings || {};
+  config.settings.solLayout = next;
+  saveConfig();
+  applySolLayout();
+  showStatus('connected', next === 'tile' ? '已切换为平铺显示' : '已切换为单屏显示');
 }
 
 function updateSolButtons() {
@@ -480,6 +587,8 @@ function bindEvents() {
   document.getElementById('btn-sol-stop').addEventListener('click', stopSol);
   document.getElementById('btn-sol-save').addEventListener('click', saveSolLog);
   document.getElementById('btn-sol-logdir').addEventListener('click', selectLogDir);
+  document.getElementById('btn-sol-layout').addEventListener('click', toggleSolLayout);
+  applySolLayout();
 
   // 自动保存开关：改完立刻持久化，并同步作用到已在运行的 SOL 标签
   const autoSaveEl = document.getElementById('sol-autosave');

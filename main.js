@@ -146,6 +146,17 @@ ipcMain.on('sol:write', (event, tabId, data) => {
   }
 });
 
+// 同步 PTY 尺寸：渲染层在容器尺寸变化时推过来（窗口缩放、平铺/单屏切换）
+ipcMain.on('sol:resize', (event, tabId, cols, rows) => {
+  const proc = ptyProcesses[tabId];
+  if (!proc) return;
+  try {
+    proc.resize(cols, rows);
+  } catch (e) {
+    // 进程可能已退出
+  }
+});
+
 /**
  * 执行 sol deactivate 释放远端 SOL 会话
  * @returns {Promise<{success:boolean, stderr?:string, error?:string}>}

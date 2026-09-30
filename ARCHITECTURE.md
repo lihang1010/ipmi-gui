@@ -360,7 +360,7 @@ ipmi-gui-electron/
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 21 个 *.test.js | 545 |
+| 21 个 *.test.js | 557 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 

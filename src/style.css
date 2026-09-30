@@ -865,6 +865,7 @@ body {
   overflow: hidden;
 }
 
+/* 单屏（默认）：所有 pane 叠在一起，只显示 active 那个 */
 .sol-terminal-pane {
   position: absolute;
   inset: 0;
@@ -873,6 +874,78 @@ body {
 
 .sol-terminal-pane.active {
   display: block;
+}
+
+/* --- 平铺模式：自动分栏，全部可见 --- */
+.sol-terminals.tile {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  grid-auto-rows: minmax(120px, 1fr);
+  gap: var(--space-sm);
+  padding: var(--space-sm);
+  overflow: auto;
+}
+
+.sol-terminals.tile .sol-terminal-pane {
+  position: relative;
+  inset: auto;
+  display: flex;
+  flex-direction: column;
+  /* 不设 min-height: 0 的话，xterm 内容会把 grid 行撑爆 */
+  min-height: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.sol-terminals.tile .sol-terminal-pane.active {
+  display: flex;
+  border-color: var(--accent);
+}
+
+/* 每个 pane 自己的标题栏，只在平铺时出现 */
+.sol-pane-header {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-xs);
+  padding: 2px var(--space-sm);
+  font-size: 11px;
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+}
+
+.sol-terminals.tile .sol-pane-header {
+  display: flex;
+}
+
+.sol-pane-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sol-pane-close {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sol-pane-close:hover {
+  color: var(--danger);
+}
+
+/* xterm 挂载点：撑满 pane 剩余空间 */
+.sol-pane-body {
+  flex: 1;
+  min-height: 0;
 }
 
 /* --- Terminal Container --- */
