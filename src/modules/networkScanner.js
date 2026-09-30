@@ -42,8 +42,18 @@ function getLocalNetwork() {
 
 /**
  * Ping 单个主机 (异步)
+ *
+ * 默认发 2 个包而不是 1 个：单包丢一次就把在线设备判死，高并发下漏报明显
+ *（实测同一网段连续扫描，Ping 命中的设备数能在 7 ~ 29 之间乱跳）。
+ *
+ * exec 的硬超时也必须留足余量：并发拉起几十个 ping.exe 时，进程创建本身
+ * 就可能吃掉几百毫秒，若卡在 ping 自身的超时上，活着的设备会被误杀。
+ *
+ * @param {string} ip
+ * @param {number} timeout 单个包的等待时间（Windows 的 -w 为毫秒，Linux 的 -W 为秒）
+ * @param {number} packets 发送的 ICMP 包数，任一包有回应即视为在线
  */
-function pingHost(ip, timeout = 200) {
+function pingHost(ip, timeout = 200, packets = 2) {
   return new Promise((resolve) => {
     const isWindows = process.platform === 'win32';
     const flag = isWindows ? '-n' : '-c';
@@ -52,10 +62,12 @@ function pingHost(ip, timeout = 200) {
     const timeoutValue = isWindows
       ? Math.max(1, Math.round(timeout))
       : Math.max(1, Math.ceil(timeout / 1000));
+    const count = Math.max(1, packets || 1);
 
     const proc = exec(
-      `ping ${flag} 1 ${timeoutFlag} ${timeoutValue} ${ip}`,
-      { timeout: timeout + 500, windowsHide: true },
+      `ping ${flag} ${count} ${timeoutFlag} ${timeoutValue} ${ip}`,
+      // 余量按包数放大，另加 2s 覆盖并发下的进程创建开销
+      { timeout: count * timeout + 2000, windowsHide: true },
       (error) => {
         resolve(!error);
       }

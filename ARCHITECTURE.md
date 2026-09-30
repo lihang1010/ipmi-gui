@@ -223,7 +223,8 @@ ipmi-gui-electron/
     │
     └── networkScanner.js: fullScan(network, { hosts })
             │
-            ├── 第一步: Ping 扫描 (并发 50)
+            ├── 第一步: Ping 扫描 (并发 40，每台发 2 个包；
+            │       耗时瓶颈是不存在地址的 ARP 等待约 2~3s，只能靠并发压缩批次)
             │       └── pingHost() → 在线 IP 列表 (Windows -w 为毫秒)
             ├── 第二步: 端口扫描 (并发 20)
             │       └── UDP:623 (ASF Presence Ping) + TCP:623/80/443 → HTTP 产品探测
@@ -359,7 +360,7 @@ ipmi-gui-electron/
 
 | 测试文件 | 用例数 |
 |----------|--------|
-| 21 个 *.test.js | 543 |
+| 21 个 *.test.js | 545 |
 
 覆盖率详见 `test_report.md`（Jest 30）。
 

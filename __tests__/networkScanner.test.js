@@ -259,6 +259,49 @@ describe('NetworkScanner Module', () => {
 
       Object.defineProperty(process, 'platform', { value: originalPlatform });
     });
+
+    test('默认应发 2 个包，避免单包丢失把在线设备判死', async () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+
+      const { exec } = require('child_process');
+      let captured = '';
+      exec.mockImplementationOnce((cmd, opts, cb) => {
+        captured = cmd;
+        cb(null, '', '');
+        return { on: jest.fn() };
+      });
+
+      await scanner.pingHost('192.168.1.1', 200);
+
+      // 命令形如: ping -n 2 -w 200 192.168.1.1
+      expect(captured).toContain('-n 2');
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
+
+    test('exec 硬超时应比 ping 自身超时留足余量', async () => {
+      const originalPlatform = process.platform;
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+
+      const { exec } = require('child_process');
+      let capturedOpts = null;
+      exec.mockImplementationOnce((cmd, opts, cb) => {
+        capturedOpts = opts;
+        cb(null, '', '');
+        return { on: jest.fn() };
+      });
+
+      await scanner.pingHost('192.168.1.1', 200);
+
+      // 2 个包 × 200ms + 2000ms 余量 = 2400ms
+      // 旧实现是 200 + 500 = 700ms：高并发下进程还没起来就被 kill，
+      // 活着的设备被误判离线
+      expect(capturedOpts.timeout).toBe(2400);
+      expect(capturedOpts.timeout).toBeGreaterThan(200 * 2);
+
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    });
   });
 
   describe('scanPort', () => {

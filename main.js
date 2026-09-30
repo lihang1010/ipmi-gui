@@ -259,7 +259,12 @@ ipcMain.handle('scan:start', async (event, options = {}) => {
     const results = await fullScan(network, {
       hosts: cidrToHosts(network, cidr),
       usePing: usePing !== false,
-      pingConcurrency: 50,
+      // 并发 40 是实测的折中点。慢的根源是不存在地址的 ARP 等待（约 2~3s，
+      // -w 管不到），只能靠并发压缩批次：62 个地址实测 15→10.3s、40→5.6s。
+      // 原值 50 之所以不稳，是因为「单包 + exec 硬超时仅 700ms」—— ping.exe
+      // 还没起来就被 kill，在线设备被判离线。这两条已在 pingHost 里修掉
+      //（2 个包、硬超时 count*timeout+2000），并发 60 也复测过稳定。
+      pingConcurrency: 40,
       pingTimeout: timeout,
       portConcurrency: 20,
       portTimeout: timeout,
