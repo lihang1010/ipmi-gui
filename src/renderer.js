@@ -22,6 +22,7 @@ const theme = require('./modules/theme');
 const { describeUpdate } = require('./modules/updateStatus');
 const scanLog = require('./modules/scanLog');
 const scanFilter = require('./modules/scanFilter');
+const findBar = require('./modules/findBar');
 
 // ========== 全局状态 ==========
 let _currentServer = null;
@@ -49,6 +50,7 @@ document.addEventListener('DOMContentLoaded', () => {
   favorites.loadFavorites();
   bindEvents();
   bindKeyboardShortcuts();
+  initFindBar();
   initScan();
   initMemoryMonitor();
 
@@ -376,6 +378,9 @@ function bindKeyboardShortcuts() {
     if (e.ctrlKey && e.key === 'r') { e.preventDefault(); refreshCurrentPanel(); }
     if (e.ctrlKey && e.key === 'l') { e.preventDefault(); clearCurrentPanel(); }
     if (e.ctrlKey && e.key === 'n') { e.preventDefault(); openDialog(); }
+    // Ctrl+F：打开页面查找（面板内收集 Range + CSS Custom Highlight 着色）
+    if (findBar.isFindShortcut(e)) { e.preventDefault(); openFindBar(); return; }
+    if (e.key === 'Escape' && findState.open) { e.preventDefault(); closeFindBar(); return; }
     if (e.key === 'Escape') {
       const fd = document.getElementById('favorite-dialog');
       const sd = document.getElementById('server-dialog');
@@ -409,6 +414,311 @@ function clearCurrentPanel() {
   } else {
     clearOutput('output-' + tab);
   }
+}
+
+// ========== 页面查找（Ctrl+F） ==========
+
+/**
+ * 查找栏状态
+ *
+ * 命中集合自己维护（而不是交给 webContents.findInPage）：
+ * findInPage 会连查找框自己的文字一起算进命中，还会把输入框里的内容也高亮，
+ * 计数虚高、Enter 也常常"没反应"（当前命中就停在输入框上）。
+ * 这里只在**当前激活面板**里收集 Range，再用 CSS Custom Highlight API 着色，
+ * 不插入任何节点，输出区的 textContent 与换行完全不动。
+ */
+const findState = {
+  open: false,
+  query: '',
+  matches: 0,
+  activeMatchOrdinal: 0,
+  refindTimer: null
+};
+
+/** 命中 Range 列表（文档顺序）与当前下标（0 起） */
+let findRanges = [];
+let findIndex = 0;
+
+/** Custom Highlight 的注册名，样式见 style.css 的 ::highlight() 规则 */
+const FIND_HIGHLIGHT_ALL = 'find-match';
+const FIND_HIGHLIGHT_ACTIVE = 'find-active';
+
+/** 当前激活的 tab key（无 DOM 时返回空串） */
+function getActiveTabKey() {
+  const t = document.querySelector ? document.querySelector('.tab.active') : null;
+  return t && t.dataset ? (t.dataset.tab || '') : '';
+}
+
+function initFindBar() {
+  const bar = document.getElementById('find-bar');
+  if (!bar) return;
+
+  const input = document.getElementById('find-input');
+  if (input) {
+    // 输入即搜索：每次改动都重新收集命中，并回到第一个
+    input.addEventListener('input', (e) => {
+      findState.query = e.target.value;
+      runFind();
+    });
+
+    // Enter 下一个 / Shift+Enter 上一个；不关闭查找栏
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      stepFind(e.shiftKey ? -1 : 1);
+    });
+  }
+
+  const bindClick = (id, handler) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('click', handler);
+  };
+  bindClick('find-next', () => stepFind(1));
+  bindClick('find-prev', () => stepFind(-1));
+  bindClick('find-close', closeFindBar);
+
+  // 输出区是整块重写的（传感器「刷新数据」、SEL 刷新、切服务器都算），
+  // 重写后旧 Range 全部失效，必须重新收集一次。
+  // 只认「当前可见面板」里的变化：顶栏的内存徽标、状态文字也在频繁更新，
+  // 否则每几秒就会把命中位置重置回第一个。
+  if (typeof MutationObserver !== 'undefined') {
+    const scope = document.querySelector('.main');
+    if (scope) {
+      const observer = new MutationObserver((records) => {
+        if (mutationTouchesActivePanel(records)) scheduleRefind();
+      });
+      observer.observe(scope, { childList: true, characterData: true, subtree: true });
+    }
+  }
+}
+
+/** 这批 DOM 变化是否落在当前激活的面板内（隐藏面板不参与查找） */
+function mutationTouchesActivePanel(records) {
+  const panel = document.querySelector('.panel.active');
+  if (!panel || typeof panel.contains !== 'function') return false;
+  return records.some(record => panel.contains(record.target));
+}
+
+function openFindBar() {
+  const bar = document.getElementById('find-bar');
+  if (!bar) return;
+
+  findState.open = true;
+  bar.style.display = 'flex';
+
+  const input = document.getElementById('find-input');
+  if (input) {
+    // 有选中文本就带进来（多行选中只取第一行），和浏览器 Ctrl+F 行为一致
+    const selection = (typeof window.getSelection === 'function')
+      ? window.getSelection().toString()
+      : '';
+    const picked = findBar.pickSelection(selection);
+    if (picked) {
+      input.value = picked;
+      findState.query = picked;
+    }
+    input.focus();
+    if (typeof input.select === 'function') input.select();
+  }
+
+  updateFindHint();
+  if (findBar.isActiveQuery(findState.query)) runFind();
+  else renderFindCount();
+}
+
+function closeFindBar() {
+  const bar = document.getElementById('find-bar');
+  findState.open = false;
+  if (bar) bar.style.display = 'none';
+
+  if (findState.refindTimer) {
+    clearTimeout(findState.refindTimer);
+    findState.refindTimer = null;
+  }
+
+  findRanges = [];
+  findIndex = 0;
+  findState.matches = 0;
+  findState.activeMatchOrdinal = 0;
+  clearFindHighlights();
+  renderFindCount();
+}
+
+/**
+ * 重新收集命中（查询词变化 / 内容刷新后调用）
+ *
+ * 只扫**当前激活面板**的文本节点：
+ * 查找栏自身在 body 下、面板外，因此输入框里的文字不会被算成命中
+ * （这正是 findInPage 的老问题：它会连输入框一起搜、一起高亮）。
+ *
+ * @returns {number} 命中总数
+ */
+function runFind() {
+  const query = findBar.normalizeQuery(findState.query);
+  findRanges = [];
+  findIndex = 0;
+
+  if (query) {
+    const panel = document.querySelector('.panel.active');
+    if (panel) findRanges = collectPanelRanges(panel, query);
+  }
+
+  findState.matches = findRanges.length;
+  findState.activeMatchOrdinal = findRanges.length ? 1 : 0;
+
+  applyFindHighlights();
+  scrollActiveMatchIntoView();
+  renderFindCount();
+  return findRanges.length;
+}
+
+/**
+ * 跳到下一个 / 上一个命中
+ * @param {number} delta 1 下一个，-1 上一个
+ */
+function stepFind(delta) {
+  if (findRanges.length === 0) return runFind();
+
+  const total = findRanges.length;
+  findIndex = ((findIndex + delta) % total + total) % total;
+  findState.activeMatchOrdinal = findIndex + 1;
+
+  applyFindHighlights();
+  scrollActiveMatchIntoView();
+  renderFindCount();
+  return total;
+}
+
+/**
+ * 在面板里收集所有命中 Range（文档顺序）
+ * @param {Element} panelEl
+ * @param {string} query
+ * @returns {Range[]}
+ */
+function collectPanelRanges(panelEl, query) {
+  const ranges = [];
+  if (!panelEl || typeof document.createTreeWalker !== 'function') return ranges;
+
+  const walker = document.createTreeWalker(panelEl, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = node.parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      const tag = parent.tagName;
+      if (tag === 'SCRIPT' || tag === 'STYLE' || tag === 'TEXTAREA') {
+        return NodeFilter.FILTER_REJECT;
+      }
+      // 隐藏元素（display:none）里的文字不参与查找，否则计数会虚高
+      if (typeof parent.getClientRects === 'function' && parent.getClientRects().length === 0) {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+
+  let node = walker.nextNode();
+  while (node) {
+    const segments = findBar.findSubstringRanges(node.nodeValue, query);
+    segments.forEach(([start, end]) => {
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      ranges.push(range);
+    });
+    node = walker.nextNode();
+  }
+
+  return ranges;
+}
+
+/** 用 CSS Custom Highlight 着色：不改 DOM，输出区的换行与行结构不受影响 */
+function applyFindHighlights() {
+  clearFindHighlights();
+  if (typeof CSS === 'undefined' || !CSS.highlights || typeof Highlight === 'undefined') return;
+  if (findRanges.length === 0) return;
+
+  const active = findRanges[findIndex];
+  const others = findRanges.filter((range, index) => index !== findIndex);
+
+  if (others.length > 0) {
+    CSS.highlights.set(FIND_HIGHLIGHT_ALL, new Highlight(...others));
+  }
+  if (active) {
+    CSS.highlights.set(FIND_HIGHLIGHT_ACTIVE, new Highlight(active));
+  }
+}
+
+function clearFindHighlights() {
+  if (typeof CSS === 'undefined' || !CSS.highlights) return;
+  CSS.highlights.delete(FIND_HIGHLIGHT_ALL);
+  CSS.highlights.delete(FIND_HIGHLIGHT_ACTIVE);
+}
+
+/** 让当前命中可见：最小幅度滚动最近的滚动容器，保留上下文 */
+function scrollActiveMatchIntoView() {
+  const range = findRanges[findIndex];
+  if (!range || typeof range.getBoundingClientRect !== 'function') return;
+
+  const rect = range.getBoundingClientRect();
+  if (!rect || (rect.width === 0 && rect.height === 0)) return;
+
+  const scroller = getScrollParent(range.startContainer.parentElement);
+  if (!scroller) return;
+
+  const box = scroller.getBoundingClientRect();
+  const margin = 24;
+  if (rect.top < box.top + margin) {
+    scroller.scrollTop += rect.top - box.top - margin;
+  } else if (rect.bottom > box.bottom - margin) {
+    scroller.scrollTop += rect.bottom - box.bottom + margin;
+  }
+}
+
+/** 最近的纵向滚动容器（输出区是 pre 自己滚，不在 body 上） */
+function getScrollParent(el) {
+  let node = el;
+  while (node && node.nodeType === 1) {
+    const style = (typeof window.getComputedStyle === 'function')
+      ? window.getComputedStyle(node)
+      : null;
+    if (style && /(auto|scroll)/.test(style.overflowY)) return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
+/** 页面文本变化后重算命中：合并连续变化，避免一次刷新触发几十次扫描 */
+function scheduleRefind() {
+  if (!findState.open || !findBar.isActiveQuery(findState.query)) return;
+
+  if (findState.refindTimer) clearTimeout(findState.refindTimer);
+  findState.refindTimer = setTimeout(() => {
+    findState.refindTimer = null;
+    runFind();
+  }, 250);
+}
+
+function renderFindCount() {
+  const el = document.getElementById('find-count');
+  if (!el) return;
+
+  const { text, tone } = findBar.formatFindCount({
+    query: findState.query,
+    matches: findState.matches,
+    activeMatchOrdinal: findState.activeMatchOrdinal
+  });
+
+  el.textContent = text;
+  if (el.classList) {
+    el.classList.toggle('is-empty', tone === 'empty');
+    el.classList.toggle('is-ok', tone === 'ok');
+  }
+}
+
+/** SOL 终端的正文在 canvas 里，不在 DOM 文本节点中，查找永远 0 命中 */
+function updateFindHint() {
+  const el = document.getElementById('find-hint');
+  if (!el) return;
+  el.textContent = findBar.terminalHint(getActiveTabKey());
 }
 
 // ========== 主题 ==========
@@ -560,6 +870,11 @@ function bindEvents() {
         // 首次切入 FRU 面板时惰性读取一次
         fruView.ensureLoaded();
       }
+      // 切面板后重算一次命中：隐藏面板的内容不参与查找，计数会变
+      if (findState.open) {
+        updateFindHint();
+        scheduleRefind();
+      }
     });
   });
 
@@ -635,6 +950,7 @@ function bindEvents() {
 
   // 传感器按钮
   document.getElementById('btn-sensor-refresh').addEventListener('click', () => executeSensor(getCurrentServer()));
+  document.getElementById('btn-sensor-find').addEventListener('click', () => openFindBar());
 
   // FRU 面板：刷新 / 导出备份 / 字段编辑的按钮与对话框事件由 fruView 统一绑定
   fruView.initFruPanel({

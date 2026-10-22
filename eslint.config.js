@@ -28,7 +28,12 @@ const RENDERER_GLOBALS = {
   navigator: 'readonly',
   HTMLElement: 'readonly',
   Event: 'readonly',
-  Node: 'readonly'
+  Node: 'readonly',
+  MutationObserver: 'readonly',
+  // 页面查找：文本节点遍历 + CSS Custom Highlight（不插节点的高亮方式）
+  NodeFilter: 'readonly',
+  CSS: 'readonly',
+  Highlight: 'readonly'
 };
 
 module.exports = [

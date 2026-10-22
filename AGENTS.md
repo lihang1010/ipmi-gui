@@ -49,12 +49,13 @@ ipmi-gui-electron/
 │       ├── scanResultView.js# 扫描结果行渲染 (纯函数)
 │       ├── scanLog.js       # 扫描判定链路日志 (纯函数 + 收集器)
 │       ├── scanFilter.js    # 扫描结果搜索/筛选/排序 (纯函数)
+│       ├── findBar.js       # 页面查找 (Ctrl+F) 纯逻辑：查询/匹配区间/计数/快捷键
 │       ├── networkScanner.js# 网络扫描
 │       ├── theme.js         # 主题归一化/切换/终端配色 (纯函数)
 │       ├── updateStatus.js  # 更新状态文案/可点击性映射 (纯函数)
 │       ├── fru.js           # FRU 镜像解析/命令构建/结果判定 (纯函数)
 │       └── fruView.js       # FRU 面板渲染与写入编排 (写入->重新读取校验)
-├── __tests__/               # 单元测试 (23 套件)
+├── __tests__/               # 单元测试 (24 套件)
 └── coverage/                # 覆盖率报告 (已被 .gitignore 忽略)
 ```
 
@@ -243,6 +244,38 @@ ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据�
 - 空状态分三态：未扫描 / 正在扫描 / 无结果；「有数据但被筛掉」单独给文案
 - 批量添加与导出在结果工具栏右侧，按钮文案随勾选数变化；底部操作栏已删除（表头已有全选）
 
+### 页面查找（Ctrl+F）
+
+**不用 `webContents.findInPage`**：它按整个页面找，会把查找框自己的文字也算进命中并一起高亮
+（输入 `CPU` 就多出 1 个"命中"），`matches` 虚高、Enter 的"下一个"还可能停在输入框上，
+表现就是"按 Enter 没反应"。现在改成自己收集命中：
+
+- 遍历**当前激活面板**（`.panel.active`）的文本节点，跳过 `SCRIPT` / `STYLE` / `TEXTAREA`
+  和 `display:none`（`getClientRects().length === 0`）。查找栏在 `body` 下、面板外，
+  因此天然不会被算进命中
+- 匹配用 `findBar.findSubstringRanges()`：**字面量**匹配（不用正则，SEL 描述/传感器名里
+  `.` `(` `%` 很常见）、大小写不敏感、不重叠（`aaa` 里找 `aa` 只有 1 处）
+- 高亮用 **CSS Custom Highlight API**（`CSS.highlights` + `Highlight`，Chromium 105+，
+  Electron 28 是 120）：`find-match` 弱底色、`find-active` 强调色，样式在 `style.css` 的
+  `::highlight()` 规则里。**绝不往 DOM 插 `<mark>`** —— 输出区是纯文本 `pre`，
+  插节点会破坏换行与行结构，也会让"刷新后重新读取"拿到脏文本
+- 当前命中用下标 `findIndex` 自己推进（Enter +1 / Shift+Enter -1，取模回绕），
+  不依赖任何外部查找会话，行为完全确定
+- **滚动**：`scrollActiveMatchIntoView()` 找最近的 `overflow-y: auto|scroll` 祖先
+  （输出区是 `pre` 自己滚，不是 body），只做最小幅度滚动，保留上下文
+- **刷新后必须重算命中**：输出区是整块 `textContent = ...` 重写的，旧 Range 全部失效。
+  用 `MutationObserver` 观察 `.main`，并**只认当前激活面板内的变化**
+  （`mutationTouchesActivePanel`）——否则顶栏内存徽标每几秒更新一次就会把命中重置回第一个。
+  重算走 250ms 防抖
+- **切面板也要重算**：只在当前面板里找，换面板后计数会变（tab 点击里调 `scheduleRefind()`）
+- **SOL 终端搜不到**：xterm 正文在 canvas 里，不在 DOM 文本节点。面板激活时查找栏显示
+  「SOL 终端内容不支持页面查找」，避免用户误判为「没有这个关键字」
+- 交互：`Ctrl+F` / `Cmd+F` 打开（有选中文本自动带入，多行只取第一行）；
+  Enter 下一个、Shift+Enter 上一个、Esc 关闭（关闭时 `clearFindHighlights()`）
+- 传感器面板工具栏另有「查找」按钮，作为 `Ctrl+F` 之外的入口（发现性）
+- 纯逻辑在 `src/modules/findBar.js`，DOM 收集/高亮在 `renderer.js` 的
+  `runFind` / `stepFind` / `collectPanelRanges` / `applyFindHighlights`
+
 ### 主题（亮色 / 暗色）
 
 主题靠 `<html data-theme="dark|light">` 切换，样式表在 `:root[data-theme='light']` 覆盖
@@ -352,7 +385,8 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
 - fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
 - **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
-- 共 643 用例，23 套件
+- findBar.test.js 覆盖查询归一化 / 字面量匹配区间（元字符、重叠、越界）/ 计数文案 / 快捷键 / 选中文本
+- 共 674 用例，24 套件
 
 ---
 

@@ -8,7 +8,7 @@
 
 ## 一、单元测试结果
 
-**测试套件**: 23 个 | **测试用例**: 647 个 | **全部通过** | 耗时约 9s
+**测试套件**: 24 个 | **测试用例**: 674 个 | **全部通过** | 耗时约 9s
 
 | 测试文件 | 用例数 | 覆盖对象 | 状态 |
 |----------|--------|----------|------|
@@ -30,12 +30,13 @@
 | `scanResultView.test.js` | 29 | 扫描结果行渲染 + 转义 + 事件委托 + 电源列 | PASS |
 | `scanLog.test.js` | 22 | 日志格式化 / 裁剪 / 过滤 / 统计 / 收集器 | PASS |
 | `scanFilter.test.js` | 40 | 搜索 / 快捷筛选（含已开机）/ 排序（IP 数值序、版本段比较、缺失值置底） | PASS |
+| `findBar.test.js` | 27 | 页面查找：查询归一化 / 字面量匹配区间（元字符、重叠、越界）/ 计数文案 / 快捷键 / 选中文本 | PASS |
 | `templates.test.js` | 6 | 服务器模板填充 | PASS |
 | `theme.test.js` | 9 | 主题归一化 / 切换 / 终端配色 | PASS |
 | `ui.test.js` | 19 | 界面通用行为 | PASS |
 | `updateStatus.test.js` | 9 | 更新状态文案 / 可点击性 / 可见性 | PASS |
 | `utils.test.js` | 20 | `escapeHtml` / `isValidIP` / 输出处理 | PASS |
-| **总计** | **647** | 23 套件 | **ALL PASS** |
+| **总计** | **674** | 24 套件 | **ALL PASS** |
 
 > 上一版报告（275 用例 / 13 套件）对应 v1.0 时期的代码，FRU 编辑、主题、自动更新、
 > 凭据与版本号解析等模块在当时还不存在，故数字已整体失效。
@@ -50,11 +51,12 @@ IPC 接线本身属集成测试范畴，见第五节）。
 
 | 文件 | 语句覆盖 | 分支覆盖 | 函数覆盖 | 行覆盖 |
 |------|----------|----------|----------|--------|
-| `src/renderer.js` | 41.05% | 22.16% | 30.52% | 47.04% |
+| `src/renderer.js` | 36.70% | 18.97% | 27.64% | 42.26% |
 | `src/modules/bmcVersion.js` | 100% | 91.66% | 100% | 100% |
 | `src/modules/commandRunner.js` | 100% | 71.42% | 100% | 100% |
 | `src/modules/credentials.js` | 100% | 83.33% | 100% | 100% |
 | `src/modules/favorites.js` | 92.79% | 82.03% | 89.74% | 94.92% |
+| `src/modules/findBar.js` | 100% | 92.30% | 100% | 100% |
 | `src/modules/fru.js` | 97.53% | 92.54% | 100% | 98.55% |
 | `src/modules/fruView.js` | 79.17% | 64.83% | 82.53% | 79.22% |
 | `src/modules/ipmiTool.js` | 96.87% | 95.65% | 100% | 96.15% |
@@ -68,20 +70,21 @@ IPC 接线本身属集成测试范畴，见第五节）。
 | `src/modules/updateStatus.js` | 100% | 100% | 100% | 100% |
 | `src/modules/utils.js` | 46.87% | 52.38% | 71.42% | 52% |
 | `src/modules/windowSize.js` | 100% | 100% | 100% | 100% |
-| `src/modules/*` 小计 | **86.97%** | **74.03%** | **89.03%** | **88.27%** |
-| **汇总（含 renderer.js）** | **70.64%** | **58.98%** | **66.80%** | **73.75%** |
+| `src/modules/*` 小计 | **87.24%** | **74.48%** | **89.31%** | **88.49%** |
+| **汇总（含 renderer.js）** | **67.64%** | **56.51%** | **64.29%** | **70.76%** |
 
 ### 未覆盖代码分析
 
 | 文件 | 未覆盖原因 |
 |------|------------|
-| `renderer.js` (41.05%) | 主要是 DOM 编排与事件回调：面板切换、服务器对话框、扫描结果操作、结果视图（搜索/筛选/排序）、扫描日志面板、SOL 标签渲染。testEnvironment 为 node，DOM 靠手工 mock，只能覆盖抽出来的纯逻辑与部分时序 |
+| `renderer.js` (36.70%) | 主要是 DOM 编排与事件回调：面板切换、服务器对话框、扫描结果操作、结果视图（搜索/筛选/排序）、扫描日志面板、页面查找栏（TreeWalker 收集 Range + CSS Custom Highlight 高亮）、SOL 标签渲染。testEnvironment 为 node，DOM 靠手工 mock，只能覆盖抽出来的纯逻辑与部分时序 |
 | `templates.js` (14.81%) | `applyTemplate()` / `updateServerNameFromTemplate()` 强依赖 `document.getElementById`，node 环境下无 DOM |
 | `utils.js` (46.87%) | 已覆盖 `escapeHtml` / `isValidIP`；`showStatus` / `clearOutput` 依赖 DOM |
 | `modal.js` (67.74%) | `addEventListener` 内的关闭回调与 Escape 分支未被触发 |
 | `fruView.js` (79.17%) | 对话框内的输入校验、刷写确认流程的部分分支需要真实 DOM 事件 |
 | `networkScanner.js` (82.73%) | `getLocalNetwork()`、真实超时/网络异常分支；新增的日志分支只在特定失败路径触发 |
-| `scanFilter.js` (96.80%) | 仅 `compareField` 的 default 分支未覆盖 |
+| `scanFilter.js` (96.87%) | 仅 `compareField` 的 default 分支未覆盖 |
+| `findBar.js` (100%) | 语句/行全覆盖，仅 `findSubstringRanges` 的个别边界分支（空文本 + 空查询组合）未走全 |
 | `scanLog.js` (98.59%) | 仅 `createScanLog` 的默认参数分支未覆盖 |
 
 > 覆盖率方向：**不给 renderer.js 设门槛**（它天然是 DOM 编排层），

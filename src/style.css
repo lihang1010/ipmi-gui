@@ -1477,6 +1477,79 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* --- 页面查找栏（Ctrl+F） --- */
+
+/* 悬浮在内容右上角，不占布局：输出区、表格、SEL 列表都是文本，
+   命中由 renderer 收集 Range + CSS Custom Highlight 着色，这里只是输入条 */
+.find-bar {
+  position: fixed;
+  top: 60px;
+  right: 24px;
+  z-index: 9000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+}
+
+/* 用 id 提高特异性：.input-command 自带 flex: 1，否则输入框会吃满整条 */
+#find-input {
+  flex: 0 0 200px;
+  max-width: 200px;
+  padding: 5px 10px;
+  font-family: var(--font-sans);
+  font-size: 12px;
+}
+
+.find-count {
+  min-width: 46px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.find-count.is-ok {
+  color: var(--text-secondary);
+}
+
+.find-count.is-empty {
+  color: var(--danger);
+}
+
+/* 命中高亮走 CSS Custom Highlight API：不往 DOM 里插 <mark>，
+   输出区（pre）的文本内容与换行保持原样。
+   非当前命中用弱底色，当前命中用强调色，两者一眼可区分 */
+::highlight(find-match) {
+  background-color: var(--warning-subtle);
+  color: var(--text-primary);
+}
+
+::highlight(find-active) {
+  background-color: var(--accent);
+  color: var(--bg-app);
+}
+
+/* SOL 终端不支持查找时的提示；没有提示时不占位 */
+.find-hint {
+  font-size: 11px;
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.find-hint:empty {
+  display: none;
+}
+
+.find-bar .btn {
+  padding: 4px 8px;
+  line-height: 1;
+}
+
 /* --- Dialog --- */
 .dialog-overlay {
   position: fixed;

@@ -30,6 +30,7 @@ ipmi-gui-electron/
 │       ├── scanResultView.js  # 扫描结果行渲染（纯函数）
 │       ├── scanLog.js         # 扫描判定链路日志（纯函数 + 收集器）
 │       ├── scanFilter.js      # 扫描结果搜索/筛选/排序（纯函数）
+│       ├── findBar.js         # 页面查找（Ctrl+F）的纯逻辑：查询/计数/快捷键
 │       ├── templates.js       # 服务器模板（凭据来自 credentials.js）
 │       └── utils.js           # 工具函数
 │
@@ -129,6 +130,7 @@ ipmi-gui-electron/
 | **扫描日志** | `toggleScanLogPanel()`, `appendScanLog()`, `renderScanLog()`, `buildScanLogLine()`, `copyScanLog()`, `exportScanLog()` | 判定链路日志面板（渲染走 textContent） |
 | **主题** | `applyTheme()`, `toggleTheme()`, `updateThemeButton()` | 写 `data-theme` + 同步已开终端配色 |
 | **更新徽标** | `renderVersionBadge()`, `renderUpdateBadge()`, `handleVersionClick()`, `handleUpdateClick()` | 版本号 / 更新状态展示（`updateStatus.js` 提供文案） |
+| **页面查找** | `initFindBar()`, `openFindBar()`, `closeFindBar()`, `runFind()`, `stepFind()`, `collectPanelRanges()`, `applyFindHighlights()`, `clearFindHighlights()`, `scrollActiveMatchIntoView()`, `scheduleRefind()`, `renderFindCount()`, `updateFindHint()`, `mutationTouchesActivePanel()` | Ctrl+F 查找栏（面板内 Range + CSS Custom Highlight，刷新后重算） |
 | **面板刷新** | `refreshCurrentPanel()`, `clearCurrentPanel()` | Ctrl+R / Ctrl+L 的落地实现 |
 | **内存监控** | `initMemoryMonitor()`, `updateMemoryInfo()` | 每 5s 刷新内存显示 |
 
@@ -154,10 +156,11 @@ ipmi-gui-electron/
 | `scanResultView.js` | 扫描结果行渲染（转义 + 事件委托） | scanResultView.test.js |
 | `scanLog.js` | 扫描判定链路日志：格式化 / 裁剪 / 过滤 / 统计（纯函数 + 收集器） | scanLog.test.js |
 | `scanFilter.js` | 扫描结果搜索 / 快捷筛选 / 排序（IP 数值序、版本段比较、缺失值置底） | scanFilter.test.js |
+| `findBar.js` | 页面查找纯逻辑：查询归一化 / 字面量匹配区间 / 计数文案 / 快捷键 / 选中文本 | findBar.test.js |
 | `templates.js` | 服务器模板填充 | templates.test.js |
 | `utils.js` | escapeHtml/showStatus/clearOutput/isValidIP | utils.test.js |
 
-### 3.4 样式 (style.css, 1619 行)
+### 3.4 样式 (style.css, 2293 行)
 
 | 模块 | 说明 |
 |------|------|
@@ -363,6 +366,42 @@ app.whenReady() → setupAutoUpdater()
 状态归一化在主进程，文案在 `src/modules/updateStatus.js` 的 `describeUpdate()`（纯函数）。
 **不自动重启**：SOL 会话与正在执行的命令经不起中断。
 
+### 4.8 页面查找（Ctrl+F）
+
+```
+[Ctrl+F / Cmd+F / 传感器「查找」按钮]
+    │
+    └── renderer.js: openFindBar()
+            ├── 有选中文本 → findBar.pickSelection() 带入（多行只取第一行）
+            ├── findBar.isFindShortcut(e) 命中后 preventDefault
+            └── 输入即搜索 → runFind()
+
+[runFind] 只在当前激活面板里收集命中（查找栏在 body 下，天然被排除）
+    ├── collectPanelRanges(panel, query)
+    │       ├── TreeWalker + NodeFilter.SHOW_TEXT
+    │       ├── 跳过 SCRIPT / STYLE / TEXTAREA 与 display:none（getClientRects 为空）
+    │       └── findBar.findSubstringRanges() → 字面量、大小写不敏感、不重叠
+    ├── applyFindHighlights()  CSS.highlights.set('find-match' / 'find-active', Highlight(...))
+    ├── scrollActiveMatchIntoView()  最近的 overflow-y 容器，最小滚动
+    └── renderFindCount() → findBar.formatFindCount() → 「1/3」/「无结果」
+
+[Enter / Shift+Enter / ‹ ›] stepFind(±1) → findIndex 取模回绕 → 重涂高亮 + 滚动
+
+[输出区被重写]（传感器刷新 / SEL 刷新 / 切服务器 / 切面板）
+    └── MutationObserver(.main) → mutationTouchesActivePanel(records)
+            └── scheduleRefind() 250ms 防抖 → runFind()
+
+[Esc / ×] closeFindBar() → clearFindHighlights()（删掉两个 Highlight）
+```
+
+**不用 `webContents.findInPage`**：它按整页查找，会把查找框自己的文字算进命中并一起高亮
+（输入 `CPU` 会多 1 个"命中"），`matches` 虚高、Enter 的"下一个"还会停在输入框上，
+表现为"按 Enter 没反应"。改为面板内收集 Range + 下标推进，行为完全确定。
+**不用 `<mark>`**：输出区是纯文本 `pre`，插节点会破坏换行与行结构；Custom Highlight
+只着色不改 DOM（Chromium 105+，Electron 28 为 120）。
+**观察范围限定在当前激活面板**：否则顶栏内存徽标每几秒的更新都会把命中重置回第一个。
+**SOL 终端**正文在 canvas 里，不参与 DOM 查找，面板激活时查找栏显示明确提示。
+
 ---
 
 ## 五、IPC 通信表
@@ -470,21 +509,23 @@ app.whenReady() → setupAutoUpdater()
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| main.js | 372 | 主进程（窗口 / IPC / PTY / 扫描 / 自动更新） |
-| renderer.js | 1592 | 渲染进程（核心，DOM 编排） |
-| index.html | 432 | 界面结构（10 个面板） |
-| style.css | 1913 | 样式（双主题 token） |
-| src/modules/*.js (18 个) | 4232 | 业务逻辑模块 |
-| **总计** | **8541** | |
+| main.js | 476 | 主进程（窗口 / IPC / PTY / 扫描 / 自动更新） |
+| renderer.js | 2180 | 渲染进程（核心，DOM 编排） |
+| index.html | 463 | 界面结构（10 个面板 + 查找栏） |
+| style.css | 2293 | 样式（双主题 token + `::highlight` 命中配色） |
+| src/modules/*.js (19 个) | 5003 | 业务逻辑模块 |
+| **总计** | **10415** | |
 
-模块行数前三：`fruView.js` 985、`fru.js` 767、`networkScanner.js` 约 690。
+> 行数为物理行数（含注释与空行）。
+
+模块行数前三：`fruView.js` 1142、`fru.js` 861、`networkScanner.js` 839。
 
 | 测试套件 | 用例数 |
 |----------|--------|
-| 23 个 *.test.js | 647 |
+| 24 个 *.test.js | 674 |
 
-覆盖率详见 `test_report.md`（Jest 30）。`src/modules/` 小计语句覆盖 86.97%，
-`renderer.js` 41.05%（DOM 编排层，刻意不设门槛）。
+覆盖率详见 `test_report.md`（Jest 30）。`src/modules/` 小计语句覆盖 87.24%，
+`renderer.js` 36.70%（DOM 编排层，刻意不设门槛）。
 
 ---
 

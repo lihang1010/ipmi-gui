@@ -246,6 +246,7 @@
       <div id="panel-sensor" class="panel">
         <div class="panel-toolbar">
           <button id="btn-sensor-refresh" class="btn btn-primary">刷新数据</button>
+          <button id="btn-sensor-find" class="btn btn-ghost" data-tooltip="在当前传感器数据中查找 (Ctrl+F)">查找</button>
           <span class="separator"></span>
           <button class="btn btn-ghost btn-clear" data-target="output-sensor">清屏</button>
         </div>
@@ -444,6 +445,17 @@
         <button class="btn btn-danger" id="fru-flash-confirm">确认刷写</button>
       </div>
     </div>
+  </div>
+
+  <!-- 页面查找栏（Ctrl+F）：只搜当前面板，命中高亮走 CSS Custom Highlight（不插 DOM） -->
+  <div id="find-bar" class="find-bar" style="display: none;">
+    <input type="search" id="find-input" class="input-command find-input"
+           placeholder="在当前页面查找" autocomplete="off" spellcheck="false">
+    <span id="find-count" class="find-count"></span>
+    <span id="find-hint" class="find-hint"></span>
+    <button id="find-prev" class="btn btn-sm btn-ghost" data-tooltip="上一个 (Shift+Enter)">‹</button>
+    <button id="find-next" class="btn btn-sm btn-ghost" data-tooltip="下一个 (Enter)">›</button>
+    <button id="find-close" class="btn btn-sm btn-ghost" data-tooltip="关闭 (Esc)">✕</button>
   </div>
 
   <script src="renderer.js"></script>
