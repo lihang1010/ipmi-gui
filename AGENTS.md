@@ -48,6 +48,8 @@ ipmi-gui-electron/
 │       ├── templates.js     # 服务器模板 (凭据来自 credentials.js)
 │       ├── scanResultView.js# 扫描结果行渲染 (纯函数)
 │       ├── networkScanner.js# 网络扫描
+│       ├── theme.js         # 主题归一化/切换/终端配色 (纯函数)
+│       ├── updateStatus.js  # 更新状态文案/可点击性映射 (纯函数)
 │       ├── fru.js           # FRU 镜像解析/命令构建/结果判定 (纯函数)
 │       └── fruView.js       # FRU 面板渲染与写入编排 (写入->重新读取校验)
 ├── __tests__/               # 单元测试 (21 套件)
@@ -78,12 +80,25 @@ webPreferences: {
 | sol:stop | 渲染→主 | server | {success, stderr} |
 | sol:close | 渲染→主 | tabId, server | {success, stderr} |
 | sol:write | 渲染→主 | tabId, data | - |
+| sol:resize | 渲染→主 | tabId, cols, rows | - |
 | sol:data | 主→渲染 | {tabId, data} | - |
 | sol:exit | 主→渲染 | {tabId, exitCode} | - |
-| file:save | 渲染→主 | defaultName, content | {success, path} |
+| sol:log-open | 渲染→主 | tabId, filePath | {success, path/error} |
+| sol:log-write | 渲染→主 | tabId, data | - |
+| sol:log-close | 渲染→主 | tabId | {success} |
+| scan:getLocalNetwork | 渲染→主 | - | {ip, subnet, mask, interface}/null |
+| scan:start | 渲染→主 | {network, cidr, timeout, usePing} | {success, results/error} |
+| scan:stop | 渲染→主 | - | {success} |
+| scan:progress | 主→渲染 | {phase, done, total, percent} | - |
+| file:save | 渲染→主 | defaultName, content, filters | {success, path} |
 | dialog:selectDirectory | 渲染→主 | - | path/null |
 | dialog:selectFile | 渲染→主 | filters | path/null |
 | app:getMemory | 渲染→主 | - | {rss, heapUsed, ...} |
+| app:getVersion | 渲染→主 | - | string |
+| update:getStatus | 渲染→主 | - | {state, version?, percent?, error?} |
+| update:check | 渲染→主 | - | 同状态对象 |
+| update:install | 渲染→主 | - | {ok, error?} |
+| update:status | 主→渲染 | 状态对象 | - |
 
 > 配置不走 IPC：渲染进程的 `src/modules/configStore.js` 直接读写
 > `%APPDATA%/ipmi-gui/config.json`。

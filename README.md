@@ -11,8 +11,8 @@
 - **传感器监控** - 温度、风扇、电压等实时数据
 - **FRU 信息** - 结构化查看 Chassis / Board / Product 字段，支持导出整区镜像、逐字段编辑（写入即生效 + 写后自动校验）与整区刷写（bin 覆盖 + 写前自动备份 + 逐字节回读校验）
 - **事件日志 (SEL)** - 系统事件日志查看与管理
-- **用户管理** - IPMI 用户的增删改查
-- **网络配置** - IPMI 网络参数配置
+- **用户管理** - 用户列表查看（增删改可经「原始命令」执行 `user set` 等）
+- **网络配置** - `lan print` 网络参数查看（修改走「原始命令」）
 - **原始命令** - 执行任意 ipmitool 命令
 
 ### 特色功能
@@ -284,14 +284,26 @@ IPMI管理工具\
       "username": "ADMIN",
       "password": "password",
       "interface": "lanplus",
-      "cipherSuite": 17
+      "cipherSuite": 17,
+      "privilegeLevel": "ADMINISTRATOR"
     }
   ],
   "settings": {
-    "lastSaveDir": "C:\\Users\\xxx\\Desktop"
-  }
+    "lastSaveDir": "C:\\Users\\xxx\\Desktop",
+    "theme": "dark",
+    "solLayout": "single",
+    "autoSaveSol": false
+  },
+  "favorites": []
 }
 ```
+
+| settings 字段 | 默认 | 说明 |
+|---------------|------|------|
+| `lastSaveDir` | 桌面 | 上次保存目录，也是 SOL 日志默认目录 |
+| `theme` | `dark` | `dark` / `light` |
+| `solLayout` | `single` | `single`（单屏）/ `tile`（平铺） |
+| `autoSaveSol` | `false` | 启动 SOL 时自动写日志文件 |
 
 ## 常见问题
 
@@ -343,18 +355,20 @@ Get-ChildItem *.exe | Unblock-File
 
 ```
 ipmi-gui-electron/
-├── main.js              # Electron 主进程
+├── main.js              # Electron 主进程（窗口 / IPC / PTY / 扫描 / 自动更新）
 ├── package.json         # 项目配置
 ├── electron-builder.yml # electron-builder 配置
-├── build.ps1            # 构建脚本
-├── bin/                 # ipmitool 文件（打包时复制）
+├── build.ps1            # 构建可发布包（NSIS + 免安装 + latest.yml）
+├── build.bat            # 仅本地自测（--dir，不含自动更新产物）
+├── bin/                 # ipmitool.exe + Cygwin DLL（打包时复制）
+├── scripts/             # 辅助脚本（图标转换等）
 ├── src/
-│   ├── index.html       # 主界面
-│   ├── renderer.js      # 渲染进程脚本
-│   ├── style.css        # 样式
+│   ├── index.html       # 主界面（10 个面板）
+│   ├── renderer.js      # 渲染进程脚本（DOM 编排）
+│   ├── style.css        # 样式（双主题 token）
 │   ├── config/          # 默认凭据模板（唯一来源）
-│   └── modules/         # 业务逻辑模块
-├── __tests__/           # 单元测试（21 套件）
+│   └── modules/         # 业务逻辑模块（16 个）
+├── __tests__/           # 单元测试（21 套件 / 563 用例）
 └── assets/
     └── icon.ico         # 应用图标
 ```
@@ -369,6 +383,16 @@ ipmi-gui-electron/
 | @xterm/addon-fit | ^0.10.0 | 自适应尺寸插件 |
 | @xterm/addon-serialize | ^0.12.0 | 终端内容序列化插件 |
 | electron-builder | ^24.0.0 | 打包工具 |
+
+## 开发文档
+
+| 文档 | 内容 |
+|------|------|
+| `AGENTS.md` | 开发规范与坑点（改代码前先看这份，含 FRU / 扫描 / 主题的实现契约） |
+| `ARCHITECTURE.md` | 架构分层、模块职责、数据流、IPC 全表、配置结构 |
+| `FEATURES.md` | 功能清单与后续路线（含工时估算） |
+| `test_report.md` | 单元测试与覆盖率现状 |
+| `PROJECT_HISTORY.md` | 技术选型与关键决策记录（历史参考，部分内容已过时） |
 
 ## 许可证
 

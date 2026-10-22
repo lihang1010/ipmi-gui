@@ -17,6 +17,7 @@ ipmi-gui-electron/
 │   │   └── ipmi-credentials.json  # 默认凭据唯一来源
 │   └── modules/               # 业务逻辑模块（不生成 HTML）
 │       ├── configStore.js     # 配置读写（唯一实现）
+│       ├── windowSize.js      # 主窗口初始尺寸（按屏幕工作区自适应）
 │       ├── ipmiTool.js        # 路径解析 / 参数构建 / 命令行分词（主+渲染共用）
 │       ├── credentials.js     # 凭据模板读取
 │       ├── bmcVersion.js      # mc info 版本号解析
@@ -58,8 +59,11 @@ ipmi-gui-electron/
 │  • IPC 通信处理                                                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                        IPC 通道                                  │
-│  ipmi:execute, sol:start/stop/close/write, sol:data/exit        │
-│  file:save, dialog:selectDirectory/File, app:getMemory          │
+│  ipmi:execute                                                   │
+│  sol:start/stop/close/write/resize, sol:data/exit, sol:log-*    │
+│  scan:getLocalNetwork/start/stop, scan:progress                 │
+│  file:save, dialog:select*, app:getMemory/getVersion            │
+│  update:getStatus/check/install, update:status                  │
 ├─────────────────────────────────────────────────────────────────┤
 │                      渲染进程 (renderer.js)                      │
 ├─────────────────────────────────────────────────────────────────┤
@@ -84,32 +88,44 @@ ipmi-gui-electron/
 
 ### 3.1 主进程 (main.js)
 
-| 函数 | 职责 | 行数 |
+| 函数 / IPC | 职责 | 约行数 |
 |------|------|------|
-| `createWindow()` | 创建主窗口（尺寸按屏幕工作区自适应） | 20 |
+| `createWindow()` | 创建主窗口（尺寸按屏幕工作区自适应） | 19 |
 | `getIpmiToolPath()` | 委托 `ipmiTool.resolveIpmiToolPath()`，缺失返回 null | 3 |
-| `deactivateSolSession()` | 执行 sol deactivate（sol:stop / sol:close 复用） | 26 |
 | IPC: `ipmi:execute` | 执行 IPMI 命令（参数经 tokenizeCommand 分词） | 30 |
-| IPC: `sol:start/stop/close/write` | SOL 管理（多标签 + PTY 回收） | 55 |
-| IPC: `app:getMemory` | 返回进程内存占用 | 9 |
+| IPC: `sol:start` | pty.spawn 启动选中的 SOL（按 tabId 存储） | 39 |
+| IPC: `sol:write` / `sol:resize` | 写入按键 / 同步 PTY 尺寸 | 15 |
+| `deactivateSolSession()` | 执行 sol deactivate（sol:stop / sol:close 复用） | 26 |
+| IPC: `sol:stop` / `sol:close` | 释放远端会话 / 强制回收本地 PTY | 16 |
+| IPC: `sol:log-open/write/close` | SOL 日志追加写流（每标签一个） | 34 |
+| IPC: `scan:getLocalNetwork/start/stop` | 网络扫描（进度经 `scan:progress` 推送） | 41 |
 | IPC: `file:save` | 文件保存对话框 | 15 |
-| IPC: `dialog:select*` | 目录/文件选择 | 20 |
+| IPC: `dialog:select*` | 目录/文件选择 | 23 |
+| IPC: `app:getMemory` / `app:getVersion` | 内存占用 / 当前版本 | 12 |
+| `setupAutoUpdater()` + `update:*` | electron-updater 接线与状态推送 | 76 |
+| 单实例锁 / 生命周期 | `requestSingleInstanceLock`、退出时回收 PTY | 35 |
 
 **说明**: 主进程不读写配置（统一由渲染进程 `configStore.js` 负责）。
 
-**依赖**: electron, node-pty, fs, path, child_process
+**依赖**: electron, electron-updater, node-pty, fs, path, child_process
 
 ### 3.2 渲染进程 (renderer.js)
 
 | 模块 | 函数 | 职责 |
 |------|------|------|
-| **初始化** | `bindEvents()`, `bindKeyboardShortcuts()` | 事件绑定、快捷键 |
-| **SOL 多标签** | `addSolTab()`, `switchSolTab()`, `closeSolTab()`, `startSol()`, `stopSol()`, `saveSolLog()` | 多标签终端管理 |
+| **初始化** | `init()`, `bindEvents()`, `bindKeyboardShortcuts()` | 加载配置、事件绑定、快捷键 |
+| **SOL 多标签** | `createTerminal()`, `addSolTab()`, `renderSolTabs()`, `switchSolTab()`, `closeSolTab()` | 多标签终端创建与切换 |
+| **SOL 平铺** | `applySolLayout()`, `toggleSolLayout()`, `getSolLayout()`, `updateSolButtons()` | 平铺 / 单屏切换（`settings.solLayout`） |
+| **SOL 运行** | `startSol()`, `stopSol()`, `updateSolTabStatus()` | 启动 / 停止会话、标签状态点 |
+| **SOL 日志** | `startSolLog()`, `stopSolLog()`, `saveSolLog()`, `buildSolLogName()`, `applyAutoSaveToRunningTabs()` | 自动保存 + 手动导出 |
 | **服务器管理** | `updateServerList()`, `openDialog()`, `saveServer()`, `deleteServer()`, `batchDeleteServer()` | CRUD + 批量删除 |
 | **连接测试** | `testConnection()` | raw 6 1 连通性测试 |
 | **导入导出** | `exportConfig()`, `importConfig()` | 配置导入导出 |
-| **日志目录** | `getLogDir()`, `selectLogDir()` | 日志保存位置 |
-| **网络扫描 UI** | `startScan()`, `stopScan()`, `renderScanResults()`, `addSelectedScanResults()`, `exportScanResults()` | 扫描交互 |
+| **日志目录** | `getLogDir()`, `selectLogDir()`, `updateLogDirDisplay()` | 日志保存位置 |
+| **网络扫描 UI** | `initScan()`, `startScan()`, `stopScan()`, `updateScanProgress()`, `renderScanResults()`, `addSelectedScanResults()`, `exportScanResults()` | 扫描交互与进度 |
+| **主题** | `applyTheme()`, `toggleTheme()`, `updateThemeButton()` | 写 `data-theme` + 同步已开终端配色 |
+| **更新徽标** | `renderVersionBadge()`, `renderUpdateBadge()`, `handleVersionClick()`, `handleUpdateClick()` | 版本号 / 更新状态展示（`updateStatus.js` 提供文案） |
+| **面板刷新** | `refreshCurrentPanel()`, `clearCurrentPanel()` | Ctrl+R / Ctrl+L 的落地实现 |
 | **内存监控** | `initMemoryMonitor()`, `updateMemoryInfo()` | 每 5s 刷新内存显示 |
 
 **依赖**: electron (ipcRenderer), xterm, @xterm/addon-fit, @xterm/addon-serialize
@@ -118,38 +134,34 @@ ipmi-gui-electron/
 
 | 文件 | 职责 | 测试覆盖 |
 |------|------|----------|
-| `configStore.js` | 配置读写 (fs 直接操作 %APPDATA%，唯一实现) | 见 test_report.md |
-| `ipmiTool.js` | 路径解析 / 参数构建 / 命令行分词 | 新增 |
-| `credentials.js` | 凭据模板读取（ipmi-credentials.json 唯一入口） | 见 test_report.md |
-| `bmcVersion.js` | mc info 版本号解析（按厂商取 Aux 字节） | 见 test_report.md |
-| `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | 见 test_report.md |
-| `favorites.js` | 收藏夹 CRUD/执行/排序 | 见 test_report.md |
-| `fru.js` | FRU 镜像与 `fru print` 解析 / index 映射 / 命令构建 / 结果判定 | 见 fru.test.js |
-| `theme.js` | 主题名归一化 / 一键切换 / 显示名 / 终端配色（纯函数） | 见 theme.test.js |
-| `updateStatus.js` | 自动更新状态的文案 / 可点击性 / 可见性映射（纯函数） | 见 updateStatus.test.js |
-| `fruView.js` | FRU 字段表渲染 + 写入→重新读取校验编排 | 见 fruView.test.js |
-| `modal.js` | 自定义 alert/confirm 弹窗 | 见 test_report.md |
-| `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证/CIDR 展开 | 见 test_report.md |
-| `scanResultView.js` | 扫描结果行渲染（转义 + 事件委托） | 新增 |
-| `templates.js` | 服务器模板填充 | 见 test_report.md |
-| `utils.js` | escapeHtml/showStatus/clearOutput/isValidIP | 见 test_report.md |
+| `configStore.js` | 配置读写 (fs 直接操作 %APPDATA%，唯一实现) | configStore.test.js |
+| `ipmiTool.js` | 路径解析 / 参数构建 / 命令行分词 | ipmiTool.test.js |
+| `credentials.js` | 凭据模板读取（ipmi-credentials.json 唯一入口） | credentials.test.js |
+| `bmcVersion.js` | mc info 版本号解析（按厂商取 Aux 字节） | bmcVersion.test.js |
+| `commandRunner.js` | 命令执行封装 (executeCommand/Power/Sensor/Raw) | commandRunner.test.js |
+| `favorites.js` | 收藏夹 CRUD/执行/排序/导入导出 | favorites.test.js |
+| `fru.js` | FRU 镜像与 `fru print` 解析 / index 映射 / 命令构建 / 结果判定 | fru.test.js |
+| `fruView.js` | FRU 字段表渲染 + 写入→重新读取校验 / 整区刷写编排 | fruView.test.js |
+| `theme.js` | 主题名归一化 / 一键切换 / 显示名 / 终端配色（纯函数） | theme.test.js |
+| `updateStatus.js` | 自动更新状态的文案 / 可点击性 / 可见性映射（纯函数） | updateStatus.test.js |
+| `windowSize.js` | 主窗口初始尺寸（按屏幕工作区计算，纯函数） | main.test.js |
+| `modal.js` | 自定义 alert/confirm 弹窗 | modal.test.js |
+| `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证/CIDR 展开 | networkScanner.test.js |
+| `scanResultView.js` | 扫描结果行渲染（转义 + 事件委托） | scanResultView.test.js |
+| `templates.js` | 服务器模板填充 | templates.test.js |
+| `utils.js` | escapeHtml/showStatus/clearOutput/isValidIP | utils.test.js |
 
-### 3.4 样式 (style.css)
+### 3.4 样式 (style.css, 1619 行)
 
-| 模块 | 行数 | 说明 |
-|------|------|------|
-| CSS 变量 | 80 | 设计系统 (颜色/间距/圆角/阴影) |
-| 工具栏 | 30 | 顶部工具栏 |
-| 选项卡 | 30 | Tab 切换 |
-| 面板 | 20 | 内容面板 |
-| 终端 | 15 | xterm.js 容器 + SOL 标签栏 |
-| 输出区域 | 20 | 命令输出显示 |
-| 按钮 | 60 | 各种按钮样式 |
-| 对话框 | 80 | 模态框 |
-| 表单 | 40 | 输入框/选择框 |
-| 收藏夹 | 80 | 收藏列表 |
-| 扫描结果 | 60 | 网络扫描结果列表 |
-| 滚动条 | 15 | 自定义滚动条 |
+| 模块 | 说明 |
+|------|------|
+| CSS 变量 | 60+ token：颜色 / 间距 / 圆角 / 阴影 / 语义色（`--tint-*` 双主题反向） |
+| 主题覆盖 | `:root[data-theme='light']` 覆盖颜色类 token；`--select-arrow` 各给一份 |
+| 工具栏 / 选项卡 / 面板 | 顶栏（含版本徽标、更新徽标、主题按钮）、tab 切换、面板过渡 |
+| SOL 终端 | xterm 容器 + 标签栏 + 平铺网格布局 |
+| 按钮 / 表单 / 对话框 | 四态（hover / active / loading / disabled）、模态框、确认框 |
+| 收藏夹 / 扫描结果 / FRU 字段表 | 各面板专用列表与表格样式 |
+| 滚动条 / 提示框 | 自定义滚动条、`user-select: text` 的数据区 |
 
 ---
 
@@ -177,16 +189,18 @@ ipmi-gui-electron/
 ```
 用户点击按钮
     │
-    ├── renderer.js: executeCommand() / commandRunner.js
-    │       │
-    │       └── ipcRenderer.invoke('ipmi:execute', server, command)
+    ├── renderer.js: executeCommand(command, outputId, server, args)
+    │       │        ├── 先占位「执行中...」并将输出区 opacity 置 0.5
+    │       │        └── 结果经 utils.formatCommandOutput() 统一格式化
+    │       └── ipcRenderer.invoke('ipmi:execute', server, command, args)
     │
     └── main.js: ipcMain.handle('ipmi:execute')
             │
             ├── resolveIpmiToolPath()  获取路径（缺失则返回明确错误）
             ├── buildArgs(server)      构建连接参数
             ├── tokenizeCommand(cmd)   分词（支持引号）
-            └── child_process.spawn()  执行命令
+            ├── ...args                附加 argv 原样拼在末尾（含空格/引号的值走这里）
+            └── child_process.spawn()
                     │
                     └── 返回 { code, stdout, stderr }
 ```
@@ -196,13 +210,14 @@ ipmi-gui-electron/
 ```
 用户点击"启动 SOL"
     │
-    ├── renderer.js: startSol() → addSolTab(server) 创建标签
-    │       │
+    ├── renderer.js: startSol() → addSolTab(server) 创建标签与终端
+    │       │        ├── 若开启「自动保存」→ startSolLog(tab)
+    │       │        └── 若当前为「平铺」→ applySolLayout() 重算各终端尺寸
     │       └── ipcRenderer.invoke('sol:start', server, tabId)
     │
     └── main.js: ipcMain.handle('sol:start')
             │
-            ├── pty.spawn()           创建伪终端
+            ├── pty.spawn()           创建伪终端（cwd 指向 ipmitool 所在目录）
             ├── ptyProcesses[tabId]   按 tabId 存储
             ├── proc.onData()         转发输出
             └── proc.onExit()         清理并通知
@@ -210,6 +225,14 @@ ipmi-gui-electron/
                     └── mainWindow.webContents.send('sol:data', {tabId, data})
                             │
                             └── renderer.js: terminal.write(data)
+                                    └── 若该标签有日志流 → sol:log-write 追加同一份数据
+
+[键盘输入] renderer terminal.onData → sol:write(tabId, data) → proc.write
+[容器尺寸变化] ResizeObserver → fitAddon.fit() → sol:resize(tabId, cols, rows) → proc.resize
+
+[停止 / 关闭标签]
+    ├── sol:stop(server)        → sol deactivate 释放远端会话（本地 PTY 保留）
+    └── sol:close(tabId, server)→ 先 proc.kill() 回收本地 PTY，再 deactivate 远端
 ```
 
 ### 4.4 网络扫描流程
@@ -217,23 +240,31 @@ ipmi-gui-electron/
 ```
 用户点击"开始扫描"
     │
-    ├── renderer.js: 校验网段 + 大网段耗时确认（超过 1024 个地址先弹框）
+    ├── renderer.js: startScan()
+    │       ├── 校验网段 + 大网段耗时确认（超过 1024 个地址先弹框）
+    │       └── ipcRenderer.invoke('scan:start', { network, cidr, timeout, usePing })
+    │               └── 同时监听 scan:progress 更新进度条
     │
-    ├── main.js: cidrToHosts(network, cidr) → 主机列表 (/16~/30，按 32 位整数对齐)
-    │
-    └── networkScanner.js: fullScan(network, { hosts })
+    └── main.js: ipcMain.handle('scan:start')
+            │   注意：扫描涉及 child_process / dgram / net / http，
+            │   全部在主进程执行，渲染层只负责展示与进度
             │
-            ├── 第一步: Ping 扫描 (并发 40，每台发 2 个包；
-            │       耗时瓶颈是不存在地址的 ARP 等待约 2~3s，只能靠并发压缩批次)
-            │       └── pingHost() → 在线 IP 列表 (Windows -w 为毫秒)
-            ├── 第二步: 端口扫描 (并发 20)
-            │       └── UDP:623 (ASF Presence Ping) + TCP:623/80/443 → HTTP 产品探测
-            │       └── 过滤: 无 TCP:623 且无 TCP:443 → 丢弃
-            ├── 第三步: IPMI 验证 (并发 5)
-            │       └── verifyIPMITemplate() 逐条尝试 credentials.js 提供的凭据
-            │       └── 通过 → 标记 template + verified
-            │       └── 再执行 mc info → bmcVersion.js 生成版本号
-            └── 返回结果 → renderScanResults() → scanResultView.js 渲染行
+            ├── cidrToHosts(network, cidr) → 主机列表 (/16~/30，按 32 位整数对齐)
+            │
+            └── networkScanner.fullScan(network, { hosts, ... })
+                    │
+                    ├── 第一步: Ping 预探测（**默认关闭** usePing=false）
+                    │       开启时并发 40、每台 2 个包；耗时瓶颈是不存在地址的 ARP 等待
+                    │       （约 2~3s，-w 管不到），只能靠并发压缩批次
+                    │       └── pingHost() → 在线 IP 列表 (Windows -w 为毫秒)
+                    ├── 第二步: 端口扫描 (并发 20)
+                    │       └── UDP:623 (ASF Presence Ping) + TCP:623/80/443 → HTTP 产品探测
+                    │       └── 过滤: 无 TCP:623 且无 TCP:443 → 丢弃
+                    ├── 第三步: IPMI 验证 (并发 5)
+                    │       └── verifyIPMITemplate() 逐条尝试 credentials.js 提供的凭据
+                    │       └── 通过 → 标记 template + verified
+                    │       └── 再执行 mc info → bmcVersion.js 生成版本号
+                    └── 返回结果 → renderScanResults() → scanResultView.js 渲染行
 ```
 
 ### 4.5 FRU 字段读取与编辑
@@ -270,6 +301,46 @@ ipmi-gui-electron/
 > 点「写入」直接生效（无二次确认），因此按钮以「新值合法且与原值不同」为启用条件；
 > 不做写前自动备份，需要留存原始数据时由用户点「导出备份」自行保存。
 
+### 4.6 SOL 日志自动保存
+
+```
+[勾选「自动保存」] settings.autoSaveSol = true
+    ├── 立即对已打开的会话生效（applyAutoSaveToRunningTabs）
+    └── 之后每次 startSol 都自动开流
+
+[启动会话] renderer.startSolLog(tab)
+    ├── buildSolLogName(server, tabId)  生成 %日志目录%/sol-<host>-<时间>.log
+    └── ipcRenderer.invoke('sol:log-open', tabId, filePath)
+            └── main.js: fs.createWriteStream(filePath, { flags: 'a' })
+
+[收到输出] sol:data → renderer 写终端 → 同时 sol:log-write(tabId, data)
+                                   └── 主进程把 PTY 原始流（含 ANSI）追加进该标签的流
+
+[结束会话 / 关标签 / 关闭自动保存] sol:log-close(tabId) → stream.end()
+```
+
+刻意**不复用** `file:save`：那是「弹保存框 + 全量覆盖」，逐帧追加会反复弹框并互相覆盖。
+写失败（磁盘满 / 权限）只放弃该标签的录制，不打断 SOL 会话。
+
+### 4.7 自动更新
+
+```
+app.whenReady() → setupAutoUpdater()
+    ├── !app.isPackaged → 状态 skipped（开发模式不检查）
+    └── 延迟 5s → autoUpdater.checkForUpdates()
+            ├── checking-for-update → { state: 'checking' }
+            ├── update-available    → { state: 'available', version } → 自动后台下载
+            ├── download-progress   → { state: 'downloading', percent }
+            ├── update-downloaded   → { state: 'ready', version } → 顶栏提示「重启更新到 vX」
+            ├── update-not-available→ { state: 'none' }
+            └── error               → { state: 'error', error }（不阻塞启动）
+
+[用户点击顶栏徽标] update:install → quitAndInstall(false, true)
+```
+
+状态归一化在主进程，文案在 `src/modules/updateStatus.js` 的 `describeUpdate()`（纯函数）。
+**不自动重启**：SOL 会话与正在执行的命令经不起中断。
+
 ---
 
 ## 五、IPC 通信表
@@ -281,14 +352,28 @@ ipmi-gui-electron/
 | `sol:stop` | 渲染→主 | server | {success, stderr} |
 | `sol:close` | 渲染→主 | tabId, server | {success, stderr/warning} |
 | `sol:write` | 渲染→主 | tabId, data | - |
+| `sol:resize` | 渲染→主 | tabId, cols, rows | - |
 | `sol:data` | 主→渲染 | {tabId, data} | - |
 | `sol:exit` | 主→渲染 | {tabId, exitCode} | - |
-| `file:save` | 渲染→主 | defaultName, content | {success, path} |
+| `sol:log-open` | 渲染→主 | tabId, filePath | {success, path/error} |
+| `sol:log-write` | 渲染→主 | tabId, data | - |
+| `sol:log-close` | 渲染→主 | tabId | {success} |
+| `scan:getLocalNetwork` | 渲染→主 | - | {ip, subnet, mask, interface} / null |
+| `scan:start` | 渲染→主 | {network, cidr, timeout, usePing} | {success, results/error} |
+| `scan:stop` | 渲染→主 | - | {success} |
+| `scan:progress` | 主→渲染 | {phase, done, total, percent} | - |
+| `file:save` | 渲染→主 | defaultName, content, filters | {success, path} |
 | `dialog:selectDirectory` | 渲染→主 | - | path/null |
 | `dialog:selectFile` | 渲染→主 | filters | path/null |
 | `app:getMemory` | 渲染→主 | - | {rss, heapUsed, heapTotal, external} |
+| `app:getVersion` | 渲染→主 | - | string |
+| `update:getStatus` | 渲染→主 | - | {state, version?, percent?, error?} |
+| `update:check` | 渲染→主 | - | 同状态对象 |
+| `update:install` | 渲染→主 | - | {ok, error?} |
+| `update:status` | 主→渲染 | 状态对象 | - |
 
-> `sol:stop` 释放远端会话；`sol:close` 额外回收本地 PTY（关闭标签时使用）。
+> `sol:stop` 只释放远端会话（本地 PTY 保留）；`sol:close` 额外回收本地 PTY，
+> 关闭标签时必须走后者，否则进程句柄泄漏。
 
 ---
 
@@ -310,17 +395,28 @@ ipmi-gui-electron/
     }
   ],
   "settings": {
-    "lastSaveDir": "string"
+    "lastSaveDir": "C:\\Users\\xxx\\Desktop",
+    "theme": "dark|light",
+    "solLayout": "single|tile",
+    "autoSaveSol": false
   },
   "favorites": [
     {
       "name": "string",
       "command": "string",
-      "desc": "string"
+      "desc": "string",
+      "category": "AMI|openUBMC|onetree|''（空字符串表示通用）"
     }
   ]
 }
 ```
+
+| settings 键 | 默认 | 说明 |
+|-------------|------|------|
+| `lastSaveDir` | 桌面 | 上次保存目录，也作为 SOL 日志默认目录 |
+| `theme` | `dark` | 主题，非法值由 `theme.js` 归一化回落 |
+| `solLayout` | `single` | SOL 终端单屏 / 平铺 |
+| `autoSaveSol` | `false` | 启动 SOL 时自动开日志文件 |
 
 ---
 
@@ -351,18 +447,21 @@ ipmi-gui-electron/
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| main.js | 298 | 主进程 |
-| renderer.js | 1091 | 渲染进程 (核心) |
-| index.html | 355 | 界面结构 |
-| style.css | 1490 | 样式 |
-| src/modules/*.js (13 个) | 3257 | 业务逻辑模块 |
-| **总计** | **6193** | |
+| main.js | 365 | 主进程（窗口 / IPC / PTY / 扫描 / 自动更新） |
+| renderer.js | 1286 | 渲染进程（核心，DOM 编排） |
+| index.html | 383 | 界面结构（10 个面板） |
+| style.css | 1619 | 样式（双主题 token） |
+| src/modules/*.js (16 个) | 3604 | 业务逻辑模块 |
+| **总计** | **7257** | |
 
-| 测试文件 | 用例数 |
+模块行数前三：`fruView.js` 985、`fru.js` 767、`networkScanner.js` 595。
+
+| 测试套件 | 用例数 |
 |----------|--------|
 | 21 个 *.test.js | 563 |
 
-覆盖率详见 `test_report.md`（Jest 30）。
+覆盖率详见 `test_report.md`（Jest 30）。`src/modules/` 小计语句覆盖 86.11%，
+`renderer.js` 42.08%（DOM 编排层，刻意不设门槛）。
 
 ---
 
@@ -370,12 +469,12 @@ ipmi-gui-electron/
 
 | 问题 | 说明 | 优先级 |
 |------|------|--------|
-| renderer.js 仍然较大 | 1041 行，已部分拆分到 modules/，可继续拆 | 中 |
-| 无 TypeScript | 类型安全缺失 | 中 |
-| 密码明文存储 | 配置文件中密码未加密（可考虑 safeStorage） | 高 |
-| 扫描仍在渲染进程 | child_process/dgram/net 在渲染层执行，应移入主进程 | 中 |
+| renderer.js 仍然较大 | 1286 行，纯逻辑已抽到 modules/，剩余主要是 DOM 编排；可继续按面板拆分 | 中 |
+| 无 TypeScript | 类型安全缺失（servers / settings / FRU 字段全靠约定） | 中 |
+| 密码明文存储 | 配置文件中密码未加密（可考虑 Electron `safeStorage`） | 高 |
 | 渲染层仍用 nodeIntegration | contextIsolation 关闭 + CSP 含 unsafe-inline/eval | 高 |
 | 无错误边界 | 未捕获异常可能导致崩溃 | 低 |
+| FRU 写入无自动备份（字段级） | 只有整区刷写会强制备份；字段级靠用户手点「导出备份」 | 低 |
 
 ### 已修复（v1.2）
 
@@ -401,9 +500,28 @@ ipmi-gui-electron/
   - `fruView.js` 编排「`fru edit` 写入 → 重新读取校验」，点「写入」直接生效（无二次确认、不做写前自动备份）
   - 新值经 IPC argv 传递；`fru edit` 成功退出码为 1，改为解析输出判定
   - 可编辑范围：Chassis / Board / Product 的 8-bit ASCII 字段（index 0-9、非空、≤63 字节）
-  - 不提供 Internal Use、整区 `fru write` 覆盖与 `fru upgEkey`（回滚走「原始命令」面板）
+  - 不提供 Internal Use 与 `fru upgEkey`（回滚走「原始命令」面板）
+- FRU 整区刷写（`fru write`）：
+  - 下发前 `validateFlashImage()` 自校验（大小等于设备 FRU、可解析、三区校验和正确）
+  - 写前自动备份到 `%TEMP%/ipmi-gui-fru/`（独立文件名，避免被回读覆盖）
+  - 成败只看 `Size to Write == Fru Size` + 回读 `compareImages()` 逐字节比对；
+    `fru write` 退出码恒为 0，不可作判据
+
+### 新增（v1.1.x）
+
+- 亮色 / 暗色主题切换（`theme.js` 纯函数 + `data-theme` 覆盖 token，SOL 终端配色同步跟随）
+- 自动更新（GitHub Releases + electron-updater）：后台下载、**不自动重启**，
+  只有 `ready` 后用户确认才 `quitAndInstall`；顶栏常驻版本号，点击可手动检查
+- SOL 多标签平铺显示 + PTY 尺寸同步（`sol:resize`）；修复输入串台
+- SOL 日志自动保存（`sol:log-*` 追加写流，默认关闭，开关即时生效）
+- 扫描链路整体移入主进程（`scan:start/stop/progress`），渲染层只做展示
+- Ping 预探测改为默认关闭（实测比先 Ping 快约 3 倍，且能发现禁 Ping 设备）
+- 修复 Ping 单包 + 硬超时过短导致在线设备误杀（改为 2 包、硬超时 `count*timeout+2000`）
+- 扫描支持 `/16` ~ `/30` 与第 4 段指定子网，超过 1024 个地址先提示耗时
+- 收藏夹分类（AMI / openUBMC / onetree / 通用）与导入导出（按名称+命令+分类去重）
+- 顶栏在窄窗口下改为整组换行，不再被挤出可视区
 
 ---
 
-*文档版本: v1.2*
-*更新时间: 2026-09-28*
+*文档版本: v1.5*
+*更新时间: 2026-10-22*
