@@ -47,12 +47,14 @@ ipmi-gui-electron/
 │       ├── modal.js         # 模态对话框
 │       ├── templates.js     # 服务器模板 (凭据来自 credentials.js)
 │       ├── scanResultView.js# 扫描结果行渲染 (纯函数)
+│       ├── scanLog.js       # 扫描判定链路日志 (纯函数 + 收集器)
+│       ├── scanFilter.js    # 扫描结果搜索/筛选/排序 (纯函数)
 │       ├── networkScanner.js# 网络扫描
 │       ├── theme.js         # 主题归一化/切换/终端配色 (纯函数)
 │       ├── updateStatus.js  # 更新状态文案/可点击性映射 (纯函数)
 │       ├── fru.js           # FRU 镜像解析/命令构建/结果判定 (纯函数)
 │       └── fruView.js       # FRU 面板渲染与写入编排 (写入->重新读取校验)
-├── __tests__/               # 单元测试 (21 套件)
+├── __tests__/               # 单元测试 (23 套件)
 └── coverage/                # 覆盖率报告 (已被 .gitignore 忽略)
 ```
 
@@ -89,7 +91,8 @@ webPreferences: {
 | scan:getLocalNetwork | 渲染→主 | - | {ip, subnet, mask, interface}/null |
 | scan:start | 渲染→主 | {network, cidr, timeout, usePing} | {success, results/error} |
 | scan:stop | 渲染→主 | - | {success} |
-| scan:progress | 主→渲染 | {phase, done, total, percent} | - |
+| scan:progress | 主→渲染 | {phase, current, total, found} | - |
+| scan:log | 主→渲染 | {time, level, ip, message} | - |
 | file:save | 渲染→主 | defaultName, content, filters | {success, path} |
 | dialog:selectDirectory | 渲染→主 | - | path/null |
 | dialog:selectFile | 渲染→主 | filters | path/null |
@@ -176,16 +179,69 @@ CIDR 展开主机 (cidrToHosts, /16~/30；按 32 位整数对齐，支持第 4 �
    |      压缩批次：15→10.3s、25→7.5s(反而不稳)、40→5.6s、60→4.6s
    +-- 多端口扫描 (UDP:623 ASF Ping / TCP:623 / TCP:80 / TCP:443)
          |
-         +-- 无 TCP:623 且无 TCP:443 -> 丢弃 (不验证)
-         +-- 有 TCP:623 或 TCP:443 -> IPMI 验证 (凭据来自 credentials.js)
+         +-- 无 UDP:623 且无 TCP:623 且无 TCP:443 -> 丢弃 (只剩 Web 端口，按普通 HTTP 服务处理)
+         +-- 有 UDP:623 或 TCP:623 或 TCP:443 -> IPMI 验证 (凭据来自 credentials.js)
                |
-               +-- 通过: 标记 verified + template 名，再执行 mc info 取 BMC 版本号
-               +-- 失败: TCP:623 开放时标记 verifyHint 提示
+               +-- 通过: verified + template 名，再并行执行 mc info (版本号) 与
+               |          power status (电源状态 on/off)
+               +-- 失败: TCP:623 开放时标记 verifyHint，并把每个凭据模板的失败原因写进扫描日志
 ```
 
 BMC 版本号 = `Firmware Revision` + '.' + Aux 字节，取字节规则见 bmcVersion.js：
 AMI 取 Aux 前 2 字节直接拼接（1.11.1109），openUBMC 取后 2 字节以点分隔（1.11.00.00）。
 ipmitool 调用统一走 `runIpmiCommand()`（execFile 逐参数传参，凭据不经 shell）。
+
+**准入规则为什么把 UDP:623 也算进来**：ipmitool 的 IPMI over LAN 走的就是 UDP 623，
+旧规则只认 TCP:623/443，会把「只开 UDP 623」的 BMC 整台丢掉（真实漏报来源）。
+反向也要注意：实测某台 openUBMC 机器 **UDP:623 探测无响应、TCP:623 也不开，只有 80/443**，
+却完全能跑 lanplus —— 所以 ASF presence ping 是**假阴性高**的判据，不能只靠它；
+两者是「或」关系而不是替代关系。
+
+### 扫描日志（漏报定位）
+
+扫描结果只告诉你「发现了谁」，日志才告诉你「为什么没发现另一个」。实现在
+`src/modules/scanLog.js`（纯函数 + 收集器），扫描器在**产生事件的位置**打点
+（`time` 为相对扫描开始的毫秒数，不能等渲染层收到 IPC 再打点，会被事件队列延迟污染）。
+
+- 入口：扫描面板工具栏「扫描日志」按钮，面板在结果区下方，展开时结果区自动压缩
+- 记录内容：阶段摘要（目标数/耗时）、每个命中地址的开放端口、每个被丢弃地址的原因、
+  每台设备**逐凭据模板**的验证结果与错误、停止与完成时的汇总
+- **详细日志**复选框（默认关）：开启后逐地址记录「无开放端口」。
+  默认关是因为 `/24` 约 250 行、`/16` 会有 6 万多行；条目超上限时
+  `trimEntries` 丢**中间**保两端，并把省略条数计入 `omitted`
+- 级别：`debug` / `info` / `ok` / `warn` / `error`；工具栏可按「仅告警与错误」过滤
+- 按钮文案带告警数（`扫描日志 (3)`），不展开也能知道本次有异常
+- 日志内容含远端可控数据（产品名、ipmitool 错误串），渲染**必须走 `textContent`**
+  （`buildScanLogLine`），不能用 innerHTML
+- 支持复制（`navigator.clipboard`）与导出 txt（走 `file:save`）
+
+### 扫描结果视图（搜索 / 筛选 / 排序）
+
+列表分两层：`scanResults` 是**原始数据**（扫描结果全量保留），`scanView` 是视图状态
+（`keyword` / `quick` / `hideExisting` / `sortKey` / `sortDir`）。任何视图操作只改 `scanView`
+再走 `renderScanView()`，**不要**去改 `scanResults` —— 否则清空搜索就找不回被滤掉的行。
+
+纯逻辑在 `src/modules/scanFilter.js`：
+
+- **排序必须按数值/段比较**：IP 用 4 段数值（字符串比较会把 `.9` 排到 `.10` 后面），
+  版本按点分段（否则 `2.0.0.10 < 2.0.0.9`）
+- **缺失值恒排末尾**：版本 / 电源 / 产品 / 架构取不到值时，无论升序降序都排最后，
+  否则降序会把「未验证」的设备顶到最前
+- 排序依赖 `Array.prototype.sort` 的稳定性（ES2019+），相等项保持探测完成顺序，
+  不会每次进度刷新都乱跳
+- 快速筛选：`all` / `unadded`（未加进服务器列表）/ `on`（已开机）/ `off`（已关机）/
+  `failed`（未通过验证）。`on` / `off` 都只认 `powerState` 明确为 `on` / `off` 的设备，
+  取不到电源状态（未验证或查询失败）既不算开机也不算关机
+- 表格列宽：勾选与操作列固定像素，中间 6 列（IP/延迟/端口/架构/版本/电源）等分剩余宽度，
+  主板名/产品名单独 2fr（窄窗 1.6fr），因为它最容易长到被省略号截断
+- 搜索匹配 IP / 架构 / 版本 / 产品名，大小写不敏感
+
+交互约定：
+
+- 表头点击排序，同列再点切换升降序（`sorted-asc` / `sorted-desc` 加 ▲▼），换列回到升序
+- 勾选状态在重绘（筛选 / 排序 / 进度刷新）时按 IP 保留，不因行序变化丢失
+- 空状态分三态：未扫描 / 正在扫描 / 无结果；「有数据但被筛掉」单独给文案
+- 批量添加与导出在结果工具栏右侧，按钮文案随勾选数变化；底部操作栏已删除（表头已有全选）
 
 ### 主题（亮色 / 暗色）
 
@@ -296,7 +352,7 @@ npm run lint                # ESLint 9 (eslint.config.js)
 - fru.test.js 用真实设备镜像（前 168 字节 hex 夹具）与 `fru print -v` 真实输出断言 index 映射
 - fruView.test.js 覆盖纯函数与写入/读取的交互时序（DOM 用注入桩 + mock IPC + 真实临时文件）
 - **mock 测不出 ipmitool 的参数形式问题**（如 `-v` 位置），此类改动必须真机跑一遍
-- 共 563 用例，21 套件
+- 共 643 用例，23 套件
 
 ---
 
@@ -413,7 +469,7 @@ fullScan 扫整个 /24 网段需 30s 超时。
 |------|----------|---------|
 | SOL 终端 | sol | startSol(), stopSol(), addSolTab(), startSolLog(), stopSolLog(), toggleSolLayout() |
 | 收藏夹 | favorites | favorites.execute(), favorites.select(), favorites.setCategoryFilter(), favorites.importFavorites() |
-| 网络扫描 | scan | scanner.fullScan(), addSingleScanResult() |
+| 网络扫描 | scan | startScan(), stopScan(), addSingleScanResult(), renderScanView(), toggleScanLogPanel(), renderScanLog() |
 | 电源 | power | executePower(action) |
 | 传感器 | sensor | executeSensor() |
 | FRU | fru | fruView.refresh(), fruView.submitEdit() |

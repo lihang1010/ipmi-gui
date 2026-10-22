@@ -41,6 +41,8 @@ jest.mock('child_process', () => ({
       cb(null, mockMcInfoOutput, '');                // mc info
     } else if (args.includes('fru')) {
       cb(null, 'Board Product             : Test Board\n', '');
+    } else if (args.includes('power')) {
+      cb(null, 'Chassis Power is on\n', '');         // power status
     } else {
       cb(null, '', '');
     }
@@ -565,6 +567,189 @@ describe('NetworkScanner Module', () => {
       // execFile 遇到非字符串参数会直接抛错，这里必须全部为字符串
       expect(args.every(arg => typeof arg === 'string')).toBe(true);
     }, 30000);
+
+    test('验证通过后应附带电源状态（power status）', async () => {
+      const result = await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1'],
+        usePing: false,
+        pingConcurrency: 1,
+        pingTimeout: 50,
+        portConcurrency: 1,
+        portTimeout: 50
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].powerState).toBe('on');
+    }, 30000);
+
+    test('onLog 应收到判定链路（目标、端口命中、验证通过、完成）', async () => {
+      const logs = [];
+      await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1'],
+        usePing: false,
+        label: '192.168.1.0/24',
+        onLog: (entry) => logs.push(entry),
+        pingConcurrency: 1,
+        pingTimeout: 50,
+        portConcurrency: 1,
+        portTimeout: 50
+      });
+
+      const text = logs.map(e => e.message).join('\n');
+      expect(text).toContain('目标 1 个地址（192.168.1.0/24）');
+      expect(text).toContain('开放');
+      expect(text).toContain('验证通过');
+      expect(text).toContain('扫描完成');
+
+      // 时间轴必须由扫描器以相对毫秒打点，不能缺字段
+      expect(logs.length).toBeGreaterThan(0);
+      expect(logs.every(e => typeof e.time === 'number' && e.time >= 0)).toBe(true);
+    }, 30000);
+
+    test('onLog 回调抛错不应打断扫描', async () => {
+      const result = await scanner.fullScan('192.168.1', {
+        hosts: ['192.168.1.1'],
+        usePing: false,
+        onLog: () => { throw new Error('日志炸了'); },
+        pingConcurrency: 1,
+        pingTimeout: 50,
+        portConcurrency: 1,
+        portTimeout: 50
+      });
+
+      expect(result).toHaveLength(1);
+      expect(result[0].verified).toBe(true);
+    }, 30000);
+
+    test('仅 UDP:623 开放也应进入验证（回归：旧规则会把只开 UDP 623 的 BMC 整台丢掉）', async () => {
+      const net = require('net');
+      const EventEmitter = require('events');
+      const original = net.Socket.getMockImplementation();
+
+      // 所有 TCP 端口拒绝连接，只剩 dgram mock 让 UDP:623 探测成功
+      net.Socket.mockImplementation(() => {
+        const socket = new EventEmitter();
+        socket.setTimeout = jest.fn();
+        socket.destroy = jest.fn();
+        socket.connect = jest.fn(() => {
+          process.nextTick(() => socket.emit('error', new Error('ECONNREFUSED')));
+        });
+        return socket;
+      });
+
+      try {
+        const result = await scanner.fullScan('192.168.1', {
+          hosts: ['192.168.1.1'],
+          usePing: false,
+          pingConcurrency: 1,
+          pingTimeout: 50,
+          portConcurrency: 1,
+          portTimeout: 50
+        });
+
+        expect(result).toHaveLength(1);
+        expect(result[0].ports['UDP:623']).toBe(true);
+        expect(result[0].ports['TCP:623']).toBe(false);
+        expect(result[0].verified).toBe(true);
+      } finally {
+        net.Socket.mockImplementation(original);
+      }
+    }, 30000);
+
+    test('只有 Web 端口开放时应跳过验证，并在日志里说明原因', async () => {
+      const net = require('net');
+      const dgram = require('dgram');
+      const EventEmitter = require('events');
+
+      const originalSocket = net.Socket.getMockImplementation();
+      const originalDgram = dgram.createSocket.getMockImplementation();
+
+      // UDP 无响应
+      dgram.createSocket.mockImplementation(() => ({
+        send: jest.fn(),
+        close: jest.fn(),
+        on: jest.fn()
+      }));
+
+      // 只有第 2 个 TCP socket（80 端口）连得上，623/443 拒绝
+      let tcpIndex = 0;
+      net.Socket.mockImplementation(() => {
+        tcpIndex++;
+        const isPort80 = tcpIndex === 2;
+        const socket = new EventEmitter();
+        socket.setTimeout = jest.fn();
+        socket.destroy = jest.fn();
+        socket.connect = jest.fn(() => {
+          process.nextTick(() => {
+            if (isPort80) socket.emit('connect');
+            else socket.emit('error', new Error('ECONNREFUSED'));
+          });
+        });
+        return socket;
+      });
+
+      try {
+        const logs = [];
+        const result = await scanner.fullScan('192.168.1', {
+          hosts: ['192.168.1.1'],
+          usePing: false,
+          onLog: (entry) => logs.push(entry),
+          pingConcurrency: 1,
+          pingTimeout: 50,
+          portConcurrency: 1,
+          portTimeout: 50
+        });
+
+        expect(result).toHaveLength(0);
+        expect(logs.some(e => e.level === 'warn' && e.message.includes('无 IPMI 特征端口'))).toBe(true);
+      } finally {
+        net.Socket.mockImplementation(originalSocket);
+        dgram.createSocket.mockImplementation(originalDgram);
+      }
+    }, 30000);
+  });
+
+  describe('parsePowerState', () => {
+    test('应解析 on', () => {
+      expect(scanner.parsePowerState('Chassis Power is on')).toBe('on');
+    });
+
+    test('应解析 off', () => {
+      expect(scanner.parsePowerState('Chassis Power is off')).toBe('off');
+    });
+
+    test('大小写与多余空白不影响', () => {
+      expect(scanner.parsePowerState('CHASSIS POWER IS   ON\n')).toBe('on');
+    });
+
+    test('非预期输出返回空串（界面留空，不猜测）', () => {
+      expect(scanner.parsePowerState('Unable to establish IPMI v2 / RMCP+ session')).toBe('');
+      expect(scanner.parsePowerState('')).toBe('');
+      expect(scanner.parsePowerState(null)).toBe('');
+    });
+  });
+
+  describe('fetchPowerState', () => {
+    test('应执行 power status 并返回状态', async () => {
+      const state = await scanner.fetchPowerState('192.168.1.1', { username: 'admin', password: 'admin' });
+
+      expect(state).toBe('on');
+
+      const { execFile } = require('child_process');
+      const call = execFile.mock.calls.find(c => c[1].includes('power'));
+      expect(call).toBeDefined();
+      expect(call[1]).toEqual(expect.arrayContaining(['power', 'status']));
+    });
+
+    test('凭据缺失时不发命令，返回空串', async () => {
+      const { execFile } = require('child_process');
+      execFile.mockClear();
+
+      const state = await scanner.fetchPowerState('192.168.1.1', null);
+
+      expect(state).toBe('');
+      expect(execFile).not.toHaveBeenCalled();
+    });
   });
 
   describe('runIpmiCommand', () => {

@@ -28,6 +28,8 @@ ipmi-gui-electron/
 │       ├── modal.js           # 模态对话框
 │       ├── networkScanner.js  # 网络扫描
 │       ├── scanResultView.js  # 扫描结果行渲染（纯函数）
+│       ├── scanLog.js         # 扫描判定链路日志（纯函数 + 收集器）
+│       ├── scanFilter.js      # 扫描结果搜索/筛选/排序（纯函数）
 │       ├── templates.js       # 服务器模板（凭据来自 credentials.js）
 │       └── utils.js           # 工具函数
 │
@@ -122,7 +124,9 @@ ipmi-gui-electron/
 | **连接测试** | `testConnection()` | raw 6 1 连通性测试 |
 | **导入导出** | `exportConfig()`, `importConfig()` | 配置导入导出 |
 | **日志目录** | `getLogDir()`, `selectLogDir()`, `updateLogDirDisplay()` | 日志保存位置 |
-| **网络扫描 UI** | `initScan()`, `startScan()`, `stopScan()`, `updateScanProgress()`, `renderScanResults()`, `addSelectedScanResults()`, `exportScanResults()` | 扫描交互与进度 |
+| **网络扫描 UI** | `initScan()`, `startScan()`, `stopScan()`, `updateScanProgress()`, `addSelectedScanResults()`, `exportScanResults()` | 扫描交互与进度 |
+| **结果视图** | `renderScanView()`, `renderScanResults()`, `buildScanEmptyHtml()`, `updateScanSortIndicators()`, `updateScanViewCount()`, `toggleScanCheckAll()` | 搜索 / 筛选 / 排序 / 全选（数据与视图分离） |
+| **扫描日志** | `toggleScanLogPanel()`, `appendScanLog()`, `renderScanLog()`, `buildScanLogLine()`, `copyScanLog()`, `exportScanLog()` | 判定链路日志面板（渲染走 textContent） |
 | **主题** | `applyTheme()`, `toggleTheme()`, `updateThemeButton()` | 写 `data-theme` + 同步已开终端配色 |
 | **更新徽标** | `renderVersionBadge()`, `renderUpdateBadge()`, `handleVersionClick()`, `handleUpdateClick()` | 版本号 / 更新状态展示（`updateStatus.js` 提供文案） |
 | **面板刷新** | `refreshCurrentPanel()`, `clearCurrentPanel()` | Ctrl+R / Ctrl+L 的落地实现 |
@@ -148,6 +152,8 @@ ipmi-gui-electron/
 | `modal.js` | 自定义 alert/confirm 弹窗 | modal.test.js |
 | `networkScanner.js` | Ping/端口/HTTP 探测/IPMI 验证/CIDR 展开 | networkScanner.test.js |
 | `scanResultView.js` | 扫描结果行渲染（转义 + 事件委托） | scanResultView.test.js |
+| `scanLog.js` | 扫描判定链路日志：格式化 / 裁剪 / 过滤 / 统计（纯函数 + 收集器） | scanLog.test.js |
+| `scanFilter.js` | 扫描结果搜索 / 快捷筛选 / 排序（IP 数值序、版本段比较、缺失值置底） | scanFilter.test.js |
 | `templates.js` | 服务器模板填充 | templates.test.js |
 | `utils.js` | escapeHtml/showStatus/clearOutput/isValidIP | utils.test.js |
 
@@ -242,8 +248,9 @@ ipmi-gui-electron/
     │
     ├── renderer.js: startScan()
     │       ├── 校验网段 + 大网段耗时确认（超过 1024 个地址先弹框）
-    │       └── ipcRenderer.invoke('scan:start', { network, cidr, timeout, usePing })
-    │               └── 同时监听 scan:progress 更新进度条
+    │       └── ipcRenderer.invoke('scan:start', { network, cidr, timeout, usePing, detailLog })
+    │               ├── 监听 scan:progress 更新进度条
+    │               └── 监听 scan:log 逐条追加日志（上限由 scanLog.js 控制）
     │
     └── main.js: ipcMain.handle('scan:start')
             │   注意：扫描涉及 child_process / dgram / net / http，
@@ -251,7 +258,9 @@ ipmi-gui-electron/
             │
             ├── cidrToHosts(network, cidr) → 主机列表 (/16~/30，按 32 位整数对齐)
             │
-            └── networkScanner.fullScan(network, { hosts, ... })
+            └── networkScanner.fullScan(network, { hosts, label, detailLog, onLog, ... })
+                    │
+                    ├── 日志打点 log(level, ip, message)：time 用相对扫描开始的毫秒数
                     │
                     ├── 第一步: Ping 预探测（**默认关闭** usePing=false）
                     │       开启时并发 40、每台 2 个包；耗时瓶颈是不存在地址的 ARP 等待
@@ -259,12 +268,25 @@ ipmi-gui-electron/
                     │       └── pingHost() → 在线 IP 列表 (Windows -w 为毫秒)
                     ├── 第二步: 端口扫描 (并发 20)
                     │       └── UDP:623 (ASF Presence Ping) + TCP:623/80/443 → HTTP 产品探测
-                    │       └── 过滤: 无 TCP:623 且无 TCP:443 → 丢弃
-                    ├── 第三步: IPMI 验证 (并发 5)
-                    │       └── verifyIPMITemplate() 逐条尝试 credentials.js 提供的凭据
-                    │       └── 通过 → 标记 template + verified
-                    │       └── 再执行 mc info → bmcVersion.js 生成版本号
-                    └── 返回结果 → renderScanResults() → scanResultView.js 渲染行
+                    │       └── 准入: 有 UDP:623 或 TCP:623 或 TCP:443 → 进入验证；
+                    │               只有 Web(80) 的按普通 HTTP 服务跳过（并记 warn 日志）
+                    │       !! UDP:623 是 IPMI over LAN 的正主端口，旧规则只认 TCP 会漏报；
+                    │          但 ASF presence ping 假阴性高（实测有设备完全不响应却能用
+                    │          lanplus），所以两者是「或」，不能互相替代
+                    ├── 第三步: IPMI 验证 (并发 5，单次 1500ms)
+                    │       └── verifyIPMITemplate() 逐条尝试 credentials.js 提供的凭据，
+                    │           每次尝试经 onAttempt 回报（详细日志下逐模板记一行）
+                    │       └── 通过 → 标记 template + verified，再 **并行**执行
+                    │           mc info（→ bmcVersion.js 版本号）
+                    │           power status（→ parsePowerState() 得 on/off）
+                    │       └── 失败 → verifyHint + 最后一次失败原因写入日志
+                    └── 返回结果 → renderScanResults() 存入 scanResults（原始数据，全量保留）
+                            └── renderScanView() → scanFilter.applyScanView(scanResults, scanView)
+                                    ├── 过滤：关键词（IP/架构/版本/产品）+ 快速筛选（全部/未添加/已开机/已关机/验证失败）+ 隐藏已添加
+                                    ├── 排序：IP 数值序 / 延迟 / 端口数 / 架构 / 版本段 / 电源 / 产品
+                                    │   缺失值（无版本、电源未知）恒排末尾
+                                    └── scanResultView.js 渲染行
+                                        └── 电源状态列：on 绿 / off 中性 / 取不到留空
 ```
 
 ### 4.5 FRU 字段读取与编辑
@@ -361,7 +383,8 @@ app.whenReady() → setupAutoUpdater()
 | `scan:getLocalNetwork` | 渲染→主 | - | {ip, subnet, mask, interface} / null |
 | `scan:start` | 渲染→主 | {network, cidr, timeout, usePing} | {success, results/error} |
 | `scan:stop` | 渲染→主 | - | {success} |
-| `scan:progress` | 主→渲染 | {phase, done, total, percent} | - |
+| `scan:progress` | 主→渲染 | {phase, current, total, found} | - |
+| `scan:log` | 主→渲染 | {time, level, ip, message} | - |
 | `file:save` | 渲染→主 | defaultName, content, filters | {success, path} |
 | `dialog:selectDirectory` | 渲染→主 | - | path/null |
 | `dialog:selectFile` | 渲染→主 | filters | path/null |
@@ -447,21 +470,21 @@ app.whenReady() → setupAutoUpdater()
 
 | 文件 | 行数 | 说明 |
 |------|------|------|
-| main.js | 365 | 主进程（窗口 / IPC / PTY / 扫描 / 自动更新） |
-| renderer.js | 1286 | 渲染进程（核心，DOM 编排） |
-| index.html | 383 | 界面结构（10 个面板） |
-| style.css | 1619 | 样式（双主题 token） |
-| src/modules/*.js (16 个) | 3604 | 业务逻辑模块 |
-| **总计** | **7257** | |
+| main.js | 372 | 主进程（窗口 / IPC / PTY / 扫描 / 自动更新） |
+| renderer.js | 1592 | 渲染进程（核心，DOM 编排） |
+| index.html | 432 | 界面结构（10 个面板） |
+| style.css | 1913 | 样式（双主题 token） |
+| src/modules/*.js (18 个) | 4232 | 业务逻辑模块 |
+| **总计** | **8541** | |
 
-模块行数前三：`fruView.js` 985、`fru.js` 767、`networkScanner.js` 595。
+模块行数前三：`fruView.js` 985、`fru.js` 767、`networkScanner.js` 约 690。
 
 | 测试套件 | 用例数 |
 |----------|--------|
-| 21 个 *.test.js | 563 |
+| 23 个 *.test.js | 647 |
 
-覆盖率详见 `test_report.md`（Jest 30）。`src/modules/` 小计语句覆盖 86.11%，
-`renderer.js` 42.08%（DOM 编排层，刻意不设门槛）。
+覆盖率详见 `test_report.md`（Jest 30）。`src/modules/` 小计语句覆盖 86.97%，
+`renderer.js` 41.05%（DOM 编排层，刻意不设门槛）。
 
 ---
 

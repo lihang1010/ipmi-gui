@@ -148,9 +148,14 @@
             <input type="checkbox" id="scan-use-ping">
             Ping 预探测
           </label>
+          <label class="checkbox-label" data-tooltip="勾选后逐条记录每个地址的探测结果（连「无开放端口」也记）。/24 约 250 行，便于确认某个 IP 到底有没有被扫到；/16 会有 6 万多行，日志会自动折叠中间部分">
+            <input type="checkbox" id="scan-detail-log">
+            详细日志
+          </label>
           <span class="separator"></span>
           <button id="btn-scan-start" class="btn btn-primary">开始扫描</button>
           <button id="btn-scan-stop" class="btn btn-danger" disabled>停止</button>
+          <button id="btn-scan-log-toggle" class="btn btn-ghost" data-tooltip="查看本次扫描的判定链路：每个地址开放了哪些端口、为什么被跳过、凭据验证失败在哪一步">扫描日志</button>
         </div>
         <!-- 进度条 -->
         <div style="padding: 10px 16px; background: var(--bg-surface); border-bottom: 1px solid var(--border-subtle);">
@@ -163,19 +168,63 @@
             <span id="scan-found-count" style="font-size:12px; color:var(--success);">发现: 0台</span>
           </div>
         </div>
-        <!-- 扫描结果 -->
-        <div style="flex:1; overflow:auto; padding:8px 16px;">
-          <div id="scan-results" style="min-height:100px;">
-            <div style="text-align:center; color:var(--text-muted); padding:40px;">点击"开始扫描"发现网络中的 IPMI 设备</div>
+        <!-- 结果视图工具栏：搜索 / 快速筛选 / 隐藏已添加 / 批量操作 -->
+        <div class="scan-view-toolbar">
+          <input type="search" id="scan-search" class="input-command scan-search" placeholder="搜索 IP / 架构 / 版本">
+          <div id="scan-chips" class="scan-chips">
+            <button class="scan-chip active" data-quick="all">全部</button>
+            <button class="scan-chip" data-quick="unadded">未添加</button>
+            <button class="scan-chip" data-quick="on">已开机</button>
+            <button class="scan-chip" data-quick="off">已关机</button>
+            <button class="scan-chip" data-quick="failed">验证失败</button>
           </div>
-        </div>
-        <!-- 底部操作 -->
-        <div class="panel-toolbar">
-          <button id="btn-scan-select-all" class="btn btn-sm">全选</button>
-          <button id="btn-scan-deselect-all" class="btn btn-sm">取消全选</button>
+          <label class="checkbox-label" data-tooltip="已添加到服务器列表的设备不再显示，避免重复挑选">
+            <input type="checkbox" id="scan-hide-existing">
+            隐藏已添加
+          </label>
+          <span id="scan-view-count" class="scan-view-count"></span>
           <span class="separator"></span>
           <button id="btn-scan-add-selected" class="btn btn-sm btn-primary" disabled>批量添加</button>
           <button id="btn-scan-export" class="btn btn-sm btn-ghost">导出结果</button>
+        </div>
+        <!-- 扫描结果 -->
+        <div style="flex:1; overflow:auto; padding:0 16px 8px;">
+          <!-- 表头与数据行共用一个 grid 容器：列宽由内容自动决定（subgrid），
+               行本身是 subgrid 项，因此所有行天然对齐 -->
+          <div id="scan-result-grid" class="scan-result-grid">
+            <div id="scan-result-header" class="scan-result-header" style="display:none;">
+              <input type="checkbox" id="scan-check-all" class="scan-checkbox" title="全选（不含已添加的设备）">
+              <span data-sort="ip" title="点击按 IP 排序">IP 地址</span>
+              <span data-sort="latency" title="点击按延迟排序">延迟</span>
+              <span data-sort="ports" title="点击按开放端口数排序">端口</span>
+              <span data-sort="arch" title="BMC 代码架构（凭据模板）；点击排序">架构</span>
+              <span data-sort="version" title="BMC 固件版本（mc info）；点击排序">版本</span>
+              <span data-sort="power" title="点击按电源状态排序（开机在前）">电源</span>
+              <span data-sort="product" title="openUBMC 显示主板名/产品名；AMI 一般只有产品名。点击排序">主板名/产品名</span>
+              <span>操作</span>
+            </div>
+            <div id="scan-results" style="display:contents;">
+              <div class="scan-empty">
+                <div class="scan-empty-title">扫描网络中的 IPMI 设备</div>
+                <div class="scan-empty-hint">填写网段与 CIDR 前缀后点「开始扫描」</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <!-- 扫描日志（默认收起，点「扫描日志」展开） -->
+        <div id="scan-log-panel" class="scan-log-panel" style="display:none;">
+          <div class="scan-log-toolbar">
+            <span id="scan-log-summary" class="scan-log-summary">暂无日志</span>
+            <span class="separator"></span>
+            <select id="scan-log-filter" class="input-command" style="width:130px">
+              <option value="all">全部日志</option>
+              <option value="problem">仅告警与错误</option>
+            </select>
+            <button id="btn-scan-log-copy" class="btn btn-sm">复制</button>
+            <button id="btn-scan-log-export" class="btn btn-sm">导出</button>
+            <button id="btn-scan-log-clear" class="btn btn-sm btn-ghost">清空</button>
+          </div>
+          <div id="scan-log-lines" class="scan-log-lines"></div>
         </div>
       </div>
 

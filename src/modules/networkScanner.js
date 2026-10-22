@@ -131,6 +131,8 @@ function scanTcpPort(ip, port, timeout = 300) {
       resolve(false);
     });
     socket.on('error', () => {
+      // 必须显式 destroy：高并发下漏掉会累积 fd，后续探测可能因资源不足失败（表现为"漏报"）
+      socket.destroy();
       resolve(false);
     });
     socket.connect(port, ip);
@@ -363,7 +365,19 @@ async function portScan(ips, options = {}) {
  *   - 禁 Ping 的设备只有跳过 Ping 才扫描得到（实测就漏过一台）
  * usePing=true 时先 Ping 筛存活，可减少端口探测的流量，但更慢。
  *
+ * 准入规则（曾经漏报的根源）：ipmitool 的 IPMI over LAN 走 **UDP 623**。
+ * 旧规则要求「TCP:623 或 TCP:443 开放」才进入验证，会把只开 UDP:623 的设备
+ * （部分老 BMC / 定制机型）整台丢掉。现在 UDP:623 与 TCP:623/443 同等对待；
+ * 只有 Web 端口（80）开放的一律不验证 —— 那是普通 HTTP 服务的特征，
+ * 放进来会让 /24 网段多花几分钟在无意义的 4 模板尝试上。
+ *
  * @param {object} options
+ * @param {object[]} [options.hosts] 显式主机列表（优先于 subnet+cidr 展开）
+ * @param {boolean} [options.usePing] 是否先做 ICMP 预探测
+ * @param {boolean} [options.detailLog] 是否逐地址记录「无开放端口」等明细
+ * @param {string} [options.label] 日志里展示的网段标签，如 192.168.60.0/24
+ * @param {Function} [options.onLog] 日志回调，收 {time, level, ip, message}
+ * @param {Function} [options.onProgress] 进度回调
  */
 async function fullScan(subnet, options = {}) {
   const {
@@ -371,14 +385,38 @@ async function fullScan(subnet, options = {}) {
     pingTimeout = 300,
     portConcurrency = 10,
     portTimeout = 300,
+    verifyTimeout = 1500,
     hosts = null,
     usePing = true,
-    onProgress
+    detailLog = false,
+    label = '',
+    onProgress,
+    onLog
   } = options;
 
   const targetHosts = (hosts && hosts.length) ? hosts : cidrToHosts(subnet, 24);
+  const startedAt = Date.now();
+
+  /**
+   * 统一日志出口
+   * time 用相对扫描开始的毫秒数，在这里打点，保证时间轴与真实执行顺序一致
+   *（不能等渲染层收到 IPC 再打点，那会被事件队列延迟污染）
+   */
+  const log = (level, ip, message) => {
+    if (!onLog) return;
+    try {
+      onLog({ time: Date.now() - startedAt, level, ip: ip || '', message });
+    } catch (e) {
+      // 日志回调异常不能打断扫描
+    }
+  };
 
   scanState = { running: true, stopped: false, results: [], current: 0, total: targetHosts.length, phase: 'ping' };
+
+  log('info', null,
+    '目标 ' + targetHosts.length + ' 个地址' + (label ? '（' + label + '）' : '') +
+    '，端口超时 ' + portTimeout + 'ms，Ping 预探测：' + (usePing ? '开' : '关') +
+    '，详细日志：' + (detailLog ? '开' : '关'));
 
   let alive = [];
 
@@ -394,24 +432,35 @@ async function fullScan(subnet, options = {}) {
       }
     });
 
-    console.log(`[SCAN] Ping 完成: ${alive.length} 台设备在线`);
+    log('info', null, 'Ping 预探测完成：存活 ' + alive.length + ' 台（用时 ' + formatElapsed(Date.now() - startedAt) + '）');
+    if (alive.length === 0) {
+      log('warn', null, '没有地址响应 Ping。若确认设备在线，请关闭「Ping 预探测」重扫 —— 禁 Ping 的设备会被这一步整台漏掉');
+    }
 
-    if (scanState.stopped) return scanState.results;
+    if (scanState.stopped) {
+      log('warn', null, '扫描已被用户停止（Ping 阶段）');
+      scanState.running = false;
+      return scanState.results;
+    }
   } else {
     // 跳过 Ping：所有目标地址直接进入端口扫描
     alive = targetHosts.map(ip => ({ ip, latency: 0 }));
     scanState.total = alive.length;
     scanState.phase = 'port';
-    console.log(`[SCAN] 跳过 Ping，直接对 ${alive.length} 个地址做端口扫描`);
+    log('info', null, '跳过 Ping，直接对 ' + alive.length + ' 个地址做端口探测');
 
     if (onProgress) onProgress({ phase: 'port', current: 0, total: alive.length, found: [] });
   }
 
   // 第二步：端口扫描
   let found = [];
+  const dropStats = { noOpenPort: 0, webOnly: 0 };
+
   if (alive.length > 0) {
     scanState.phase = 'port';
     if (onProgress) onProgress({ phase: 'port', current: 0, total: alive.length, found: [] });
+
+    const portStart = Date.now();
 
     // 扫描目标端口：UDP 623 (RMCP) + TCP 623 (RMCP+) + TCP 80/443 (Web)
     const portTargets = [
@@ -444,9 +493,22 @@ async function fullScan(subnet, options = {}) {
         }
 
         const latency = Date.now() - start;
-        const anyOpen = Object.values(portResults).some(v => v === true);
-        // 过滤：仅 UDP:623 开放，或 UDP:623 + TCP:80 开放的设备不进入验证
-        if (anyOpen && !portResults['TCP:623'] && !portResults['TCP:443']) {
+        const openLabels = portTargets.filter(t => portResults[t.label]).map(t => t.label);
+
+        if (openLabels.length === 0) {
+          dropStats.noOpenPort++;
+          // 逐地址记录只在 /24 量级可控，/16 会产生 6 万条，因此默认关闭（详细日志开关）
+          if (detailLog) log('debug', ip, '无开放端口（UDP:623 / TCP:623 / TCP:80 / TCP:443 均无响应）');
+          return null;
+        }
+
+        // 准入：UDP:623 是 IPMI over LAN 的实际端口，与 TCP:623/443 同等对待。
+        // 旧规则只认 TCP:623/443，会把只开 UDP:623 的 BMC 整台丢掉（漏报根源）
+        const hasIpmiPort = portResults['UDP:623'] || portResults['TCP:623'] || portResults['TCP:443'];
+        if (!hasIpmiPort) {
+          dropStats.webOnly++;
+          log('warn', ip, '仅 ' + openLabels.join(' / ') + ' 开放，无 IPMI 特征端口 → 跳过验证' +
+            '（若确认是 IPMI 设备，检查中间设备是否过滤了 623 端口）');
           return null;
         }
 
@@ -455,7 +517,10 @@ async function fullScan(subnet, options = {}) {
           result.productName = productInfo.productName;
           result.productSource = productInfo.source;
         }
-        return anyOpen ? result : null;
+
+        log('ok', ip, openLabels.join(' / ') + ' 开放' +
+          (productInfo ? '，产品 ' + productInfo.productName : '') + '（' + latency + 'ms）');
+        return result;
       };
     });
 
@@ -467,30 +532,51 @@ async function fullScan(subnet, options = {}) {
       if (onProgress) onProgress({ phase: 'port', current, total, found: foundItems });
     });
 
-  found = scanState.results;
-  console.log(`[SCAN] 端口扫描完成: ${found.length} 台设备有开放端口`, found.map(f => ({ ip: f.ip, ports: f.ports, product: f.productName || '-' })));
+    found = scanState.results;
+    log('info', null,
+      '端口探测完成：' + found.length + ' 台具备 IPMI 特征端口，跳过 ' +
+      (dropStats.noOpenPort + dropStats.webOnly) + ' 台（无开放端口 ' + dropStats.noOpenPort +
+      '，仅 Web 端口 ' + dropStats.webOnly + '），用时 ' + formatElapsed(Date.now() - portStart));
+    console.log(`[SCAN] 端口扫描完成: ${found.length} 台设备有开放端口`, found.map(f => ({ ip: f.ip, ports: f.ports, product: f.productName || '-' })));
   }
 
   // 第三步：IPMI 验证（并行验证，只保留验证成功的 BMC 设备）
   if (found.length > 0) {
     scanState.phase = 'verify';
+    const verifyConcurrency = 5;
+    log('info', null, '开始 IPMI 验证：' + found.length + ' 台，并发 ' + verifyConcurrency +
+      '，单次超时 ' + verifyTimeout + 'ms');
     console.log(`[SCAN] 开始验证 ${found.length} 台设备:`, found.map(f => f.ip));
     if (onProgress) onProgress({ phase: 'verify', current: 0, total: found.length, found });
 
-    const verifyConcurrency = 5;
     let verifyCurrent = 0;
 
     const tasks = found.map(device => {
       return async () => {
-        const template = await verifyIPMITemplate(device.ip);
+        // 收集每个凭据模板的尝试结果，失败时写进日志（凭据不匹配是最常见的漏报原因）
+        const attempts = [];
+        const template = await verifyIPMITemplate(device.ip, verifyTimeout, (attempt) => {
+          attempts.push(attempt);
+          if (detailLog) {
+            log(attempt.success ? 'ok' : 'debug', device.ip,
+              '凭据 ' + attempt.template + ' → ' + (attempt.success ? '通过' : '失败：' + (attempt.error || '无响应')));
+          }
+        });
+
         device.template = template;
         device.verified = !!template;
 
-        // 通讯验证成功后补充信息（mc info 版本号 / FRU 产品名）
+        // 通讯验证成功后补充信息（mc info 版本号 / power status 电源状态 / FRU 产品名）
         if (template) {
           const credential = getCredentialByName(template);
           if (credential) {
-            device.bmcVersion = await fetchBmcVersion(device.ip, credential, template);
+            // 两条命令互不依赖，并行执行省一个往返
+            const [bmcVersion, powerState] = await Promise.all([
+              fetchBmcVersion(device.ip, credential, template),
+              fetchPowerState(device.ip, credential, Math.max(2000, verifyTimeout))
+            ]);
+            device.bmcVersion = bmcVersion || '';
+            device.powerState = powerState || '';
           }
 
           // openUBMC: 取 FRU Board Product 拼合产品名
@@ -500,6 +586,10 @@ async function fullScan(subnet, options = {}) {
               device.productName = bp + '/' + device.productName;
             }
           }
+
+          log('ok', device.ip, '验证通过（' + template + '）' +
+            (device.bmcVersion ? '，版本 ' + device.bmcVersion : '') +
+            (device.powerState ? '，电源 ' + device.powerState : ''));
         }
 
         // 分析验证失败原因
@@ -511,6 +601,14 @@ async function fullScan(subnet, options = {}) {
             device.verifyHintType = 'ami';
           } else if (device.ports['TCP:623']) {
             device.verifyHint = 'TCP:623 开放但验证失败，可能是非默认凭据的 AMI BMC';
+          }
+
+          const last = attempts.length ? attempts[attempts.length - 1] : null;
+          log('error', device.ip, '验证失败：' + attempts.length + ' 个凭据模板均未通过' +
+            (last ? '（最后一次 ' + last.template + '：' + (last.error || '无响应') + '）' : '') +
+            '。若确认为 IPMI 设备，请检查凭据模板或改用「原始命令」手工测试');
+          if (device.verifyHint) {
+            log('warn', device.ip, device.verifyHint);
           }
         }
 
@@ -527,8 +625,16 @@ async function fullScan(subnet, options = {}) {
   scanState.results = found;
 
   const verifiedCount = found.filter(d => d.verified).length;
+
+  if (scanState.stopped) {
+    log('warn', null, '扫描已被用户停止：端口探测结果 ' + found.length + ' 台，已验证 ' + verifiedCount + ' 台');
+  } else {
+    log('info', null, '扫描完成：命中 ' + found.length + ' 台，验证通过 ' + verifiedCount +
+      ' 台，验证失败 ' + (found.length - verifiedCount) + ' 台，总用时 ' + formatElapsed(Date.now() - startedAt));
+  }
+
   console.log(`[SCAN] 扫描完成: 共 ${found.length} 台设备（已验证 ${verifiedCount} 台）`);
-  found.forEach(f => console.log(`  - ${f.ip}: verified=${f.verified}, template=${f.template || '-'}${f.verifyHint ? ', hint=' + f.verifyHint : ''}`));
+  found.forEach(f => console.log(`  - ${f.ip}: verified=${f.verified}, template=${f.template || '-'}, power=${f.powerState || '-'}${f.verifyHint ? ', hint=' + f.verifyHint : ''}`));
 
   scanState.running = false;
   return scanState.results;
@@ -537,17 +643,29 @@ async function fullScan(subnet, options = {}) {
 /**
  * 验证 IPMI 设备使用哪个模板
  */
-async function verifyIPMITemplate(ip, timeout = 1500) {
+async function verifyIPMITemplate(ip, timeout = 1500, onAttempt) {
   const templates = getCredentialTemplates();
 
   for (const template of templates) {
+    let result;
     try {
-      const result = await verifyIPMI(ip, template, timeout);
-      if (result.success) {
-        return template.name;
-      }
+      result = await verifyIPMI(ip, template, timeout);
     } catch (e) {
-      // 验证失败，继续尝试下一个模板
+      result = { success: false, error: e.message };
+    }
+
+    // 逐模板回报尝试结果：凭据不匹配是扫描「漏报」最常见的原因，
+    // 日志里必须能看出试过哪些模板、各自失败在哪一步
+    if (onAttempt) {
+      try {
+        onAttempt({ template: template.name, success: result.success, error: result.error || '' });
+      } catch (e) {
+        // 日志回调异常不能打断验证
+      }
+    }
+
+    if (result.success) {
+      return template.name;
     }
   }
   return null;
@@ -648,6 +766,43 @@ async function fetchBmcVersion(ip, credential, templateName, timeout = 2000) {
   return formatBmcVersion(result.stdout, templateName);
 }
 
+/** 毫秒 → '4.6s' / '1m12s'，用于日志里的耗时展示 */
+function formatElapsed(ms) {
+  const total = Math.max(0, Math.round(Number(ms) || 0));
+  if (total < 60000) return (total / 1000).toFixed(1) + 's';
+
+  const minutes = Math.floor(total / 60000);
+  const seconds = Math.round((total % 60000) / 1000);
+  return minutes + 'm' + seconds + 's';
+}
+
+/**
+ * 解析 ipmitool power status 的输出
+ *
+ * 输出形如 `Chassis Power is on` / `Chassis Power is off`。
+ * 取不到（超时 / 权限不足 / 非预期格式）时返回空串，界面留空而不是猜测。
+ *
+ * @param {string} text
+ * @returns {'on'|'off'|''}
+ */
+function parsePowerState(text) {
+  const match = String(text == null ? '' : text).match(/Chassis Power is\s+(on|off)/i);
+  return match ? match[1].toLowerCase() : '';
+}
+
+/**
+ * 获取设备电源状态（仅在 IPMI 通讯验证成功后调用）
+ * @returns {Promise<'on'|'off'|''>}
+ */
+async function fetchPowerState(ip, credential, timeout = 2000) {
+  if (!credential) return '';
+
+  const result = await runIpmiCommand(ip, credential, ['power', 'status'], timeout);
+  if (!result.stdout) return '';
+
+  return parsePowerState(result.stdout);
+}
+
 /**
  * 获取扫描状态
  */
@@ -674,6 +829,8 @@ module.exports = {
   runIpmiCommand,
   fetchFruBoardProduct,
   fetchBmcVersion,
+  fetchPowerState,
+  parsePowerState,
   pingScan,
   portScan,
   fullScan,

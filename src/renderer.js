@@ -20,6 +20,8 @@ const { getCredentialByName } = require('./modules/credentials');
 const fruView = require('./modules/fruView');
 const theme = require('./modules/theme');
 const { describeUpdate } = require('./modules/updateStatus');
+const scanLog = require('./modules/scanLog');
+const scanFilter = require('./modules/scanFilter');
 
 // ========== 全局状态 ==========
 let _currentServer = null;
@@ -53,6 +55,11 @@ document.addEventListener('DOMContentLoaded', () => {
   // 扫描进度（主进程推送）
   ipcRenderer.on('scan:progress', (event, info) => {
     updateScanProgress(info);
+  });
+
+  // 扫描日志：逐条推送，卡在某一阶段时也能立刻看到停在哪儿
+  ipcRenderer.on('scan:log', (event, entry) => {
+    appendScanLog(entry);
   });
 
   // SOL IPC 监听
@@ -1151,6 +1158,29 @@ let lastScanRenderPhase = '';
 // 本次扫描是否启用 Ping 预探测（用于进度文案）
 let lastScanUsePing = true;
 
+// 扫描判定链路日志（漏报定位用），条目上限由 scanLog 模块控制
+let scanLogStore = scanLog.createScanLog();
+// 日志面板是否展开：展开时新条目增量追加 DOM，不整块重绘
+let scanLogVisible = false;
+
+/**
+ * 结果视图状态：搜索词 / 快捷筛选 / 隐藏已添加 / 排序
+ * 与 scanResults（原始数据）分离，筛选只影响展示
+ */
+const scanView = {
+  keyword: '',
+  quick: scanFilter.QUICK_ALL,
+  hideExisting: false,
+  sortKey: 'ip',
+  sortDir: 'asc'
+};
+
+/** 是否已经跑过至少一次扫描（用于区分「还没扫」和「扫了没找到」的空状态文案） */
+let scanHasRun = false;
+
+/** 是否正在扫描（空状态文案与按钮状态用） */
+let scanRunning = false;
+
 async function initScan() {
   // 自动填充本机网段（由主进程读取网卡信息）
   try {
@@ -1165,10 +1195,231 @@ async function initScan() {
   // 绑定事件
   document.getElementById('btn-scan-start').addEventListener('click', startScan);
   document.getElementById('btn-scan-stop').addEventListener('click', stopScan);
-  document.getElementById('btn-scan-select-all').addEventListener('click', selectAllScanResults);
-  document.getElementById('btn-scan-deselect-all').addEventListener('click', deselectAllScanResults);
   document.getElementById('btn-scan-add-selected').addEventListener('click', addSelectedScanResults);
   document.getElementById('btn-scan-export').addEventListener('click', exportScanResults);
+  document.getElementById('scan-check-all').addEventListener('change', toggleScanCheckAll);
+
+  // 结果视图：搜索（结果量在千级内，即时过滤即可，不需要防抖）
+  document.getElementById('scan-search').addEventListener('input', (e) => {
+    scanView.keyword = e.target.value;
+    renderScanView();
+  });
+
+  // 隐藏已添加
+  document.getElementById('scan-hide-existing').addEventListener('change', (e) => {
+    scanView.hideExisting = e.target.checked;
+    renderScanView();
+  });
+
+  // 快速筛选 chips（事件委托，避免为每个 chip 单独绑定）
+  document.getElementById('scan-chips').addEventListener('click', (e) => {
+    const chip = e.target.closest ? e.target.closest('.scan-chip') : null;
+    if (!chip) return;
+
+    scanView.quick = chip.dataset.quick || scanFilter.QUICK_ALL;
+    document.querySelectorAll('#scan-chips .scan-chip').forEach((el) => {
+      el.classList.toggle('active', el === chip);
+    });
+    renderScanView();
+  });
+
+  // 表头排序：点同一列切换升降序，换列回到升序
+  document.getElementById('scan-result-header').addEventListener('click', (e) => {
+    const cell = e.target.closest ? e.target.closest('[data-sort]') : null;
+    if (!cell) return;
+
+    const key = cell.dataset.sort;
+    if (scanView.sortKey === key) {
+      scanView.sortDir = scanView.sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      scanView.sortKey = key;
+      scanView.sortDir = 'asc';
+    }
+    renderScanView();
+  });
+
+  // 扫描日志
+  document.getElementById('btn-scan-log-toggle').addEventListener('click', toggleScanLogPanel);
+  document.getElementById('scan-log-filter').addEventListener('change', renderScanLog);
+  document.getElementById('btn-scan-log-copy').addEventListener('click', copyScanLog);
+  document.getElementById('btn-scan-log-export').addEventListener('click', exportScanLog);
+  document.getElementById('btn-scan-log-clear').addEventListener('click', clearScanLog);
+}
+
+// ========== 扫描日志（漏报定位） ==========
+
+/**
+ * 展开 / 收起日志面板
+ * 面板与结果区共用竖直空间，展开时结果区自动压缩（CSS flex）
+ */
+function toggleScanLogPanel() {
+  scanLogVisible = !scanLogVisible;
+  const panel = document.getElementById('scan-log-panel');
+  const btn = document.getElementById('btn-scan-log-toggle');
+
+  if (panel) panel.style.display = scanLogVisible ? 'flex' : 'none';
+  if (btn) btn.classList.toggle('active', scanLogVisible);
+  if (scanLogVisible) renderScanLog();
+}
+
+/**
+ * 造一行日志 DOM
+ * message / ip 可能来自被扫描设备或 ipmitool 的错误输出，一律走 textContent，
+ * 不能拼 HTML（渲染层开了 nodeIntegration）
+ */
+function buildScanLogLine(entry) {
+  const line = document.createElement('div');
+  line.className = 'scan-log-line level-' + (entry.level || 'info');
+
+  const time = document.createElement('span');
+  time.className = 'scan-log-time';
+  time.textContent = scanLog.formatOffset(entry.time);
+
+  const level = document.createElement('span');
+  level.className = 'scan-log-level';
+  level.textContent = scanLog.LEVEL_LABELS[entry.level] || 'INFO ';
+
+  const ip = document.createElement('span');
+  ip.className = 'scan-log-ip';
+  ip.textContent = entry.ip || '';
+
+  const msg = document.createElement('span');
+  msg.className = 'scan-log-msg';
+  msg.textContent = entry.message || '';
+
+  line.appendChild(time);
+  line.appendChild(level);
+  line.appendChild(ip);
+  line.appendChild(msg);
+  return line;
+}
+
+/** 收到主进程推送的一条日志 */
+function appendScanLog(entry) {
+  if (!entry) return;
+  scanLogStore.add(entry);
+  updateScanLogSummary();
+
+  if (!scanLogVisible) return;
+
+  // 过滤为「仅告警与错误」时，新来的 info 不该插进去
+  const filterEl = document.getElementById('scan-log-filter');
+  const filter = filterEl ? filterEl.value : scanLog.FILTER_ALL;
+  if (filter === scanLog.FILTER_ALL) {
+    appendScanLogLines([entry]);
+  }
+}
+
+/** 更新日志统计与按钮上的告警计数 */
+function updateScanLogSummary() {
+  const entries = scanLogStore.toEntries();
+  const stats = scanLog.summarizeEntries(entries);
+
+  const summary = document.getElementById('scan-log-summary');
+  if (summary) {
+    if (stats.total === 0) {
+      summary.textContent = '暂无日志';
+    } else {
+      let text = '共 ' + stats.total + ' 条';
+      if (stats.problems > 0) text += '，告警 ' + stats.warn + '，错误 ' + stats.error;
+      if (scanLogStore.omitted > 0) text += '（已折叠 ' + scanLogStore.omitted + ' 条）';
+      summary.textContent = text;
+    }
+  }
+
+  // 把告警数带到按钮上：不展开日志也能知道本次扫描有异常
+  const btn = document.getElementById('btn-scan-log-toggle');
+  if (btn) {
+    btn.textContent = stats.problems > 0 ? '扫描日志 (' + stats.problems + ')' : '扫描日志';
+  }
+}
+
+/**
+ * 追加若干行到可见容器
+ * 用户停在底部附近时自动跟随到底；向上翻看历史时不打断
+ */
+function appendScanLogLines(entries) {
+  const container = document.getElementById('scan-log-lines');
+  if (!container || !entries.length) return;
+
+  const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 40;
+
+  const fragment = document.createDocumentFragment();
+  entries.forEach(entry => fragment.appendChild(buildScanLogLine(entry)));
+  container.appendChild(fragment);
+
+  if (nearBottom) container.scrollTop = container.scrollHeight;
+}
+
+/** 按当前过滤条件整块重绘（切换过滤、展开面板时用） */
+function renderScanLog() {
+  const container = document.getElementById('scan-log-lines');
+  if (!container) return;
+
+  const filterEl = document.getElementById('scan-log-filter');
+  const filter = filterEl ? filterEl.value : scanLog.FILTER_ALL;
+  const entries = scanLog.filterEntries(scanLogStore.toEntries(), filter);
+
+  container.textContent = '';
+
+  if (entries.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'scan-log-empty';
+    empty.textContent = scanLogStore.toEntries().length === 0
+      ? '扫描开始后这里会逐条显示每个地址的判定过程'
+      : '当前过滤条件下没有日志';
+    container.appendChild(empty);
+    return;
+  }
+
+  appendScanLogLines(entries);
+  container.scrollTop = container.scrollHeight;
+}
+
+function clearScanLog() {
+  scanLogStore.clear();
+  renderScanLog();
+  updateScanLogSummary();
+}
+
+async function copyScanLog() {
+  const text = scanLogStore.toText();
+  if (!text) {
+    await safeAlert('还没有扫描日志');
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    showStatus('connected', '扫描日志已复制');
+  } catch (e) {
+    await safeAlert('复制失败: ' + e.message + '\n\n可以改用「导出」保存为文件');
+  }
+}
+
+async function exportScanLog() {
+  const text = scanLogStore.toText();
+  if (!text) {
+    await safeAlert('还没有扫描日志');
+    return;
+  }
+
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  const defaultPath = require('path').join(
+    process.env.USERPROFILE || process.env.HOME,
+    'Desktop',
+    'ipmi_scan_log_' + stamp + '.txt'
+  );
+
+  const result = await ipcRenderer.invoke(
+    'file:save',
+    defaultPath,
+    text,
+    [{ name: '文本文件', extensions: ['txt', 'log'] }, { name: '所有文件', extensions: ['*'] }]
+  );
+  if (result.success) {
+    showStatus('connected', '扫描日志已导出');
+  }
 }
 
 // ========== 内存监控 ==========
@@ -1244,8 +1495,10 @@ async function startScan() {
   const subnet = document.getElementById('scan-subnet').value.trim();
   const cidr = parseInt(document.getElementById('scan-cidr').value) || 24;
   const timeout = parseInt(document.getElementById('scan-timeout').value) || 200;
-  // 默认勾选：先 Ping 探测存活再扫端口；不勾选则直接对全部地址扫端口
+  // 不勾选（默认）时直接对全部地址扫端口；勾选则先 Ping 探测存活
   const usePing = document.getElementById('scan-use-ping').checked;
+  // 详细日志：逐地址记录「无开放端口」，用于确认某个 IP 到底有没有被扫到
+  const detailLog = document.getElementById('scan-detail-log').checked;
 
   // 三段式 (192.168.1) 补成 192.168.1.0；四段式原样保留。
   // 第 4 段是网段起点，如 192.168.1.128 配 /25 表示扫后半段，不能再丢掉它。
@@ -1276,15 +1529,23 @@ async function startScan() {
   document.getElementById('btn-scan-start').disabled = true;
   document.getElementById('btn-scan-stop').disabled = false;
   document.getElementById('scan-use-ping').disabled = true;
-  document.getElementById('scan-results').innerHTML = '';
+  document.getElementById('scan-detail-log').disabled = true;
+  scanHasRun = true;
+  scanRunning = true;
   scanResults = [];
   lastScanRenderAt = 0;
   lastScanRenderPhase = '';
   lastScanUsePing = usePing;
+  renderScanView();
+
+  // 日志按「本次扫描」累积，开扫前先清空
+  scanLogStore.clear();
+  updateScanLogSummary();
+  if (scanLogVisible) renderScanLog();
 
   try {
-    // CIDR 展开与扫描均在主进程执行，进度经 scan:progress 推送
-    const result = await ipcRenderer.invoke('scan:start', { network, cidr, timeout, usePing });
+    // CIDR 展开与扫描均在主进程执行，进度经 scan:progress、日志经 scan:log 推送
+    const result = await ipcRenderer.invoke('scan:start', { network, cidr, timeout, usePing, detailLog });
     if (!result.success) {
       await safeAlert('扫描失败: ' + result.error);
       return;
@@ -1300,6 +1561,10 @@ async function startScan() {
     document.getElementById('btn-scan-start').disabled = false;
     document.getElementById('btn-scan-stop').disabled = true;
     document.getElementById('scan-use-ping').disabled = false;
+    document.getElementById('scan-detail-log').disabled = false;
+    // 结束后重绘一次：把「正在扫描…」换成结果或「未发现设备」
+    scanRunning = false;
+    renderScanView();
   }
 }
 
@@ -1308,6 +1573,7 @@ function stopScan() {
   document.getElementById('btn-scan-start').disabled = false;
   document.getElementById('btn-scan-stop').disabled = true;
   document.getElementById('scan-use-ping').disabled = false;
+  document.getElementById('scan-detail-log').disabled = false;
   document.getElementById('scan-phase').textContent = '已停止';
 }
 
@@ -1335,26 +1601,105 @@ function updateScanProgress(info) {
   }
 }
 
+/**
+ * 接收扫描结果并渲染
+ * 原始数据始终完整保存在 scanResults 里，搜索/筛选只影响展示，不会丢数据
+ */
 function renderScanResults(results) {
-  const container = document.getElementById('scan-results');
-  const config = getConfig();
-  const existingIPs = (config.servers || []).map(s => s.host);
+  scanResults = Array.isArray(results) ? results : [];
+  renderScanView();
+}
 
-  if (results.length === 0) {
-    container.innerHTML = '<div style="text-align:center; color:var(--text-muted); padding:40px;">未发现设备</div>';
+/** 按当前视图状态（搜索 / chips / 隐藏已添加 / 排序）重绘列表 */
+function renderScanView() {
+  const container = document.getElementById('scan-results');
+  if (!container) return;
+
+  const existingIPs = (getConfig().servers || []).map(s => s.host);
+  const view = scanFilter.applyScanView(scanResults, {
+    keyword: scanView.keyword,
+    quick: scanView.quick,
+    hideExisting: scanView.hideExisting,
+    existingIPs,
+    sortKey: scanView.sortKey,
+    sortDir: scanView.sortDir
+  });
+
+  // 有可见行才显示表头，避免空列表下漂着一行无意义的列名
+  const header = document.getElementById('scan-result-header');
+  if (header) header.style.display = view.length ? 'grid' : 'none';
+
+  updateScanSortIndicators();
+  updateScanViewCount(view.length, scanResults.length);
+
+  if (view.length === 0) {
+    container.innerHTML = buildScanEmptyHtml();
     bindScanResultEvents();
+    updateScanButtons();
     return;
   }
 
-  // 保留用户已勾选状态，避免进度刷新重绘时丢失
-  const checkedIPs = [...container.querySelectorAll('.scan-checkbox:checked')].map(cb => cb.value);
+  // 保留用户已勾选状态，避免筛选/排序/进度刷新重绘时丢失
+  const checkedIPs = getScanRowCheckboxes().filter(cb => cb.checked).map(cb => cb.value);
 
-  container.innerHTML = results
+  container.innerHTML = view
     .map(item => renderScanResultRow(item, { existingIPs, checkedIPs }))
     .join('');
 
   bindScanResultEvents();
   updateScanButtons();
+}
+
+/** 空状态文案：区分「还没扫」「扫描中」「扫了没找到」「筛选后没匹配」 */
+function buildScanEmptyHtml() {
+  if (!scanHasRun) {
+    return '<div class="scan-empty">' +
+      '<div class="scan-empty-title">扫描网络中的 IPMI 设备</div>' +
+      '<div class="scan-empty-hint">填写网段与 CIDR 前缀后点「开始扫描」</div>' +
+      '</div>';
+  }
+
+  if (scanRunning) {
+    return '<div class="scan-empty">' +
+      '<div class="scan-empty-title">正在扫描…</div>' +
+      '<div class="scan-empty-hint">端口探测与凭据验证需要一点时间，可展开「扫描日志」查看实时进度</div>' +
+      '</div>';
+  }
+
+  if (scanResults.length > 0) {
+    return '<div class="scan-empty">' +
+      '<div class="scan-empty-title">当前筛选条件下没有匹配的设备</div>' +
+      '<div class="scan-empty-hint">试试清空搜索词、切换筛选，或取消「隐藏已添加」</div>' +
+      '</div>';
+  }
+
+  return '<div class="scan-empty">' +
+    '<div class="scan-empty-title">未发现 IPMI 设备</div>' +
+    '<div class="scan-empty-hint">可展开「扫描日志」查看每个地址的判定过程，确认是端口未开还是凭据不匹配</div>' +
+    '</div>';
+}
+
+/** 表头排序箭头：只标记当前排序列 */
+function updateScanSortIndicators() {
+  document.querySelectorAll('#scan-result-header [data-sort]').forEach((cell) => {
+    const active = cell.dataset.sort === scanView.sortKey;
+    cell.classList.toggle('sorted-asc', active && scanView.sortDir === 'asc');
+    cell.classList.toggle('sorted-desc', active && scanView.sortDir === 'desc');
+  });
+}
+
+/** 工具栏右侧计数：筛选后显示「显示 / 总数」 */
+function updateScanViewCount(shown, total) {
+  const el = document.getElementById('scan-view-count');
+  if (!el) return;
+
+  if (total === 0) {
+    el.textContent = '';
+  } else if (shown === total) {
+    el.textContent = total + ' 台';
+  } else {
+    el.textContent = shown + ' / ' + total + ' 台';
+  }
 }
 
 /**
@@ -1383,20 +1728,34 @@ function bindScanResultEvents() {
   });
 }
 
+/** 表格内（不含表头）的勾选框 */
+function getScanRowCheckboxes() {
+  return [...document.querySelectorAll('#scan-results .scan-checkbox')];
+}
+
 function updateScanButtons() {
-  const checkboxes = document.querySelectorAll('.scan-checkbox:checked');
+  const selectable = getScanRowCheckboxes().filter(cb => !cb.disabled);
+  const checked = selectable.filter(cb => cb.checked);
+
   const btn = document.getElementById('btn-scan-add-selected');
-  btn.disabled = checkboxes.length === 0;
+  if (btn) {
+    btn.disabled = checked.length === 0;
+    btn.textContent = checked.length > 0 ? '批量添加 (' + checked.length + ')' : '批量添加';
+  }
+
+  // 表头全选框反映当前状态（部分勾选时显示 indeterminate）
+  const all = document.getElementById('scan-check-all');
+  if (all) {
+    all.disabled = selectable.length === 0;
+    all.checked = selectable.length > 0 && checked.length === selectable.length;
+    all.indeterminate = checked.length > 0 && checked.length < selectable.length;
+  }
 }
 
-function selectAllScanResults() {
-  const checkboxes = document.querySelectorAll('.scan-checkbox:not(:disabled)');
-  checkboxes.forEach(cb => { cb.checked = true; });
-  updateScanButtons();
-}
-
-function deselectAllScanResults() {
-  document.querySelectorAll('.scan-checkbox').forEach(cb => { cb.checked = false; });
+function toggleScanCheckAll(e) {
+  getScanRowCheckboxes()
+    .filter(cb => !cb.disabled)
+    .forEach(cb => { cb.checked = e.target.checked; });
   updateScanButtons();
 }
 
@@ -1420,12 +1779,13 @@ async function addSingleScanResult(ip, templateName) {
   config.servers.push(server);
   saveConfig();
   updateServerList();
-  await safeAlert(`已添加服务器: ${ip}\n模板: ${templateName || '默认'}`);
-  renderScanResults(scanResults);
+  showStatus('connected', '已添加 ' + ip + '（模板: ' + (templateName || '默认') + '）');
+  // 已添加状态要立刻反映到列表（该行会变成灰的「已添加」）
+  renderScanView();
 }
 
 async function addSelectedScanResults() {
-  const checkboxes = document.querySelectorAll('.scan-checkbox:checked');
+  const checkboxes = getScanRowCheckboxes().filter(cb => cb.checked);
   if (checkboxes.length === 0) {
     await safeAlert('请先选择要添加的设备');
     return;
@@ -1475,8 +1835,10 @@ async function exportScanResults() {
     results: scanResults.map(item => ({
       ip: typeof item === 'string' ? item : item.ip,
       latency: typeof item === 'object' ? item.latency : 0,
+      template: typeof item === 'object' ? (item.template || '') : '',
       productName: typeof item === 'object' ? (item.productName || '') : '',
-      bmcVersion: typeof item === 'object' ? (item.bmcVersion || '') : ''
+      bmcVersion: typeof item === 'object' ? (item.bmcVersion || '') : '',
+      powerState: typeof item === 'object' ? (item.powerState || '') : ''
     }))
   };
 

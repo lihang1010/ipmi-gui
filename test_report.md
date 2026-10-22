@@ -8,7 +8,7 @@
 
 ## 一、单元测试结果
 
-**测试套件**: 21 个 | **测试用例**: 563 个 | **全部通过** | 耗时约 8.8s
+**测试套件**: 23 个 | **测试用例**: 647 个 | **全部通过** | 耗时约 9s
 
 | 测试文件 | 用例数 | 覆盖对象 | 状态 |
 |----------|--------|----------|------|
@@ -24,16 +24,18 @@
 | `ipmiTool.test.js` | 16 | 路径解析 / `buildArgs` / `tokenizeCommand` | PASS |
 | `main.test.js` | 37 | 主进程逻辑（`buildArgs`、SOL 生命周期相关纯逻辑） | PASS |
 | `modal.test.js` | 26 | `safeAlert` / `safeConfirm` | PASS |
-| `networkScanner.test.js` | 47 | CIDR 展开 / Ping / 端口 / IPMI 验证 | PASS |
+| `networkScanner.test.js` | 58 | CIDR 展开 / Ping / 端口 / IPMI 验证 / 电源状态 / 扫描日志回调 | PASS |
 | `parser.test.js` | 18 | 文本输出解析 | PASS |
 | `renderer.test.js` | 66 | 渲染层逻辑（DOM 用注入桩） | PASS |
-| `scanResultView.test.js` | 18 | 扫描结果行渲染 + 转义 + 事件委托 | PASS |
+| `scanResultView.test.js` | 29 | 扫描结果行渲染 + 转义 + 事件委托 + 电源列 | PASS |
+| `scanLog.test.js` | 22 | 日志格式化 / 裁剪 / 过滤 / 统计 / 收集器 | PASS |
+| `scanFilter.test.js` | 40 | 搜索 / 快捷筛选（含已开机）/ 排序（IP 数值序、版本段比较、缺失值置底） | PASS |
 | `templates.test.js` | 6 | 服务器模板填充 | PASS |
 | `theme.test.js` | 9 | 主题归一化 / 切换 / 终端配色 | PASS |
 | `ui.test.js` | 19 | 界面通用行为 | PASS |
 | `updateStatus.test.js` | 9 | 更新状态文案 / 可点击性 / 可见性 | PASS |
 | `utils.test.js` | 20 | `escapeHtml` / `isValidIP` / 输出处理 | PASS |
-| **总计** | **563** | 21 套件 | **ALL PASS** |
+| **总计** | **647** | 23 套件 | **ALL PASS** |
 
 > 上一版报告（275 用例 / 13 套件）对应 v1.0 时期的代码，FRU 编辑、主题、自动更新、
 > 凭据与版本号解析等模块在当时还不存在，故数字已整体失效。
@@ -48,7 +50,7 @@ IPC 接线本身属集成测试范畴，见第五节）。
 
 | 文件 | 语句覆盖 | 分支覆盖 | 函数覆盖 | 行覆盖 |
 |------|----------|----------|----------|--------|
-| `src/renderer.js` | 42.08% | 23.10% | 30.90% | 48.82% |
+| `src/renderer.js` | 41.05% | 22.16% | 30.52% | 47.04% |
 | `src/modules/bmcVersion.js` | 100% | 91.66% | 100% | 100% |
 | `src/modules/commandRunner.js` | 100% | 71.42% | 100% | 100% |
 | `src/modules/credentials.js` | 100% | 83.33% | 100% | 100% |
@@ -57,26 +59,30 @@ IPC 接线本身属集成测试范畴，见第五节）。
 | `src/modules/fruView.js` | 79.17% | 64.83% | 82.53% | 79.22% |
 | `src/modules/ipmiTool.js` | 96.87% | 95.65% | 100% | 96.15% |
 | `src/modules/modal.js` | 67.74% | 33.33% | 40% | 76.92% |
-| `src/modules/networkScanner.js` | 84.54% | 54.46% | 87.14% | 87.81% |
-| `src/modules/scanResultView.js` | 100% | 100% | 100% | 100% |
+| `src/modules/networkScanner.js` | 82.73% | 57.03% | 89.47% | 85.24% |
+| `src/modules/scanFilter.js` | 96.87% | 84.67% | 100% | 98.96% |
+| `src/modules/scanLog.js` | 98.59% | 83.58% | 93.33% | 98.50% |
+| `src/modules/scanResultView.js` | 100% | 97.01% | 100% | 100% |
 | `src/modules/templates.js` | 14.81% | 0% | 0% | 17.39% |
 | `src/modules/theme.js` | 100% | 100% | 100% | 100% |
 | `src/modules/updateStatus.js` | 100% | 100% | 100% | 100% |
 | `src/modules/utils.js` | 46.87% | 52.38% | 71.42% | 52% |
 | `src/modules/windowSize.js` | 100% | 100% | 100% | 100% |
-| `src/modules/*` 小计 | **86.11%** | **72.79%** | **87.16%** | **87.58%** |
-| **汇总（含 renderer.js）** | **70.84%** | **58.52%** | **65.58%** | **74.39%** |
+| `src/modules/*` 小计 | **86.97%** | **74.03%** | **89.03%** | **88.27%** |
+| **汇总（含 renderer.js）** | **70.64%** | **58.98%** | **66.80%** | **73.75%** |
 
 ### 未覆盖代码分析
 
 | 文件 | 未覆盖原因 |
 |------|------------|
-| `renderer.js` (42%) | 主要是 DOM 编排与事件回调：面板切换、服务器对话框、扫描结果操作、SOL 标签渲染。testEnvironment 为 node，DOM 靠手工 mock，只能覆盖抽出来的纯逻辑与部分时序 |
+| `renderer.js` (41.05%) | 主要是 DOM 编排与事件回调：面板切换、服务器对话框、扫描结果操作、结果视图（搜索/筛选/排序）、扫描日志面板、SOL 标签渲染。testEnvironment 为 node，DOM 靠手工 mock，只能覆盖抽出来的纯逻辑与部分时序 |
 | `templates.js` (14.81%) | `applyTemplate()` / `updateServerNameFromTemplate()` 强依赖 `document.getElementById`，node 环境下无 DOM |
 | `utils.js` (46.87%) | 已覆盖 `escapeHtml` / `isValidIP`；`showStatus` / `clearOutput` 依赖 DOM |
 | `modal.js` (67.74%) | `addEventListener` 内的关闭回调与 Escape 分支未被触发 |
 | `fruView.js` (79.17%) | 对话框内的输入校验、刷写确认流程的部分分支需要真实 DOM 事件 |
-| `networkScanner.js` (84.54%) | `getLocalNetwork()`、超时/异常分支依赖真实网卡与网络 |
+| `networkScanner.js` (82.73%) | `getLocalNetwork()`、真实超时/网络异常分支；新增的日志分支只在特定失败路径触发 |
+| `scanFilter.js` (96.80%) | 仅 `compareField` 的 default 分支未覆盖 |
+| `scanLog.js` (98.59%) | 仅 `createScanLog` 的默认参数分支未覆盖 |
 
 > 覆盖率方向：**不给 renderer.js 设门槛**（它天然是 DOM 编排层），
 > 新功能一律把判定逻辑抽到 `src/modules/*.js` 再配单测——目前 `fru.js`（97.53%）、
@@ -109,7 +115,14 @@ Node 内置模块（`dgram` / `net` / `child_process` / `fs` / `path` / `os`）�
 | `fru edit` 等长写入退出码 0、变长退出码 1 | `fru.test.js` | 只认 `Updating Field`，不认退出码，也不要求 `Done.` |
 | `fru write` 退出码恒为 0 | `fru.test.js` | 只看 `Size to Write == Fru Size`，成功与否靠回读逐字节比对 |
 | Ping 单包 + 硬超时过短会误杀在线设备 | `networkScanner.test.js` | 每台 2 个包，硬超时 `count*timeout+2000` |
-| 扫描结果属远端可控数据 | `scanResultView.test.js` | 渲染前必须 `escapeHtml` |
+| 扫描结果属远端可控数据 | `scanResultView.test.js` | 渲染前必须 `escapeHtml`；电源状态走白名单 |
+| 只开 UDP:623 的 BMC 被准入规则整台丢弃 | `networkScanner.test.js` | UDP:623 与 TCP:623/443 同等对待（lanplus 走的是 UDP） |
+| 扫描日志时间轴被 IPC 延迟污染 | `networkScanner.test.js` | `time` 由扫描器以相对毫秒打点，渲染层不再打点 |
+| 日志超限时把最新记录挤掉 | `scanLog.test.js` | 丢中间保两端，省略条数计入 `omitted` |
+| 日志回调异常打断扫描 | `networkScanner.test.js` | `onLog` / `onAttempt` 全部 try-catch |
+| IP 按字符串排序会错位（.9 排到 .10 后面） | `scanFilter.test.js` | `compareIp` 按 4 段数值比较 |
+| 版本号按字符串排序（2.0.0.10 < 2.0.0.9） | `scanFilter.test.js` | `compareVersion` 按段数值比较 |
+| 降序把「取不到值」顶到最前 | `scanFilter.test.js` | 版本/电源/产品/架构的缺失值恒排末尾 |
 | 默认窗口宽度不足挤掉顶栏徽标 | `renderer.test.js` | `document` 桩必须带 `documentElement`；窗口尺寸走 `windowSize.js` |
 
 > **mock 测不出 ipmitool 的参数形式问题**（例如 `-v` 的位置、`fru edit` 的 index 语义）。

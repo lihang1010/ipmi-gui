@@ -310,11 +310,11 @@ ipcMain.handle('dialog:selectFile', async (event, filters) => {
 // 获取本机网段
 ipcMain.handle('scan:getLocalNetwork', () => getLocalNetwork());
 
-// 开始扫描，进度通过 scan:progress 推送
+// 开始扫描，进度通过 scan:progress 推送、判定链路日志通过 scan:log 推送
 ipcMain.handle('scan:start', async (event, options = {}) => {
   // usePing 默认 false：实测直接扫端口比先 Ping 更快（约 3 倍）也更全
   //（禁 Ping 的设备只有跳过 Ping 才扫得到）
-  const { network, cidr = 24, timeout = 200, usePing = false } = options || {};
+  const { network, cidr = 24, timeout = 200, usePing = false, detailLog = false } = options || {};
   if (!network) {
     return { success: false, error: '缺少网段参数' };
   }
@@ -332,9 +332,18 @@ ipcMain.handle('scan:start', async (event, options = {}) => {
       pingTimeout: timeout,
       portConcurrency: 20,
       portTimeout: timeout,
+      // 日志里展示成 192.168.60.0/24，便于对照报告
+      label: network + '/' + cidr,
+      detailLog: detailLog === true,
       onProgress: (info) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('scan:progress', info);
+        }
+      },
+      // 逐条推送而非攒到最后：扫描卡住时也能看到停在哪一步
+      onLog: (entry) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('scan:log', entry);
         }
       }
     });
